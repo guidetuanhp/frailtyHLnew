@@ -1,11 +1,18 @@
 #ifndef FHL_CORE_H
 #define FHL_CORE_H
 
+#ifndef USE_FC_LEN_T
+#define USE_FC_LEN_T
+#endif
+#include <Rconfig.h>
 #include <R.h>
 #include <Rinternals.h>
 #include <Rmath.h>
 #include <R_ext/BLAS.h>
 #include <R_ext/Lapack.h>
+#ifndef FCONE
+#define FCONE
+#endif
 #include <R_ext/Utils.h>
 #include <limits.h>
 #include <math.h>

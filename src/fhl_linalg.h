@@ -3,10 +3,17 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#ifndef USE_FC_LEN_T
+#define USE_FC_LEN_T
+#endif
+#include <Rconfig.h>
 #include <R.h>
 #include <Rinternals.h>
 #include <R_ext/BLAS.h>
 #include <R_ext/Lapack.h>
+#ifndef FCONE
+#define FCONE
+#endif
 #include <Rmath.h>
 
 static inline int fhl_safe_add_size(size_t a, size_t b, size_t *out) {

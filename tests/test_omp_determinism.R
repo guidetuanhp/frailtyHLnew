@@ -23,7 +23,7 @@ stopifnot(
   all(is.finite(fn_ltrc$FixCoef)), all(is.finite(fn_ltrc$RandCoef))
 )
 
-# 2. Bitwise OMP_NUM_THREADS=1 vs OMP_NUM_THREADS=4 determinism across k >= 128 strip-parallel kernels
+# 2. Bitwise OMP_NUM_THREADS=1 vs OMP_NUM_THREADS=2 determinism across k >= 128 strip-parallel kernels
 rscript <- file.path(R.home("bin"), "Rscript")
 lib_vec <- paste0("c(", paste(shQuote(.libPaths()), collapse = ","), ")")
 run_omp_sub <- function(nth) {
@@ -48,12 +48,12 @@ run_omp_sub <- function(nth) {
   readRDS(rds)
 }
 r1 <- run_omp_sub(1L)
-r4 <- run_omp_sub(4L)
+r2 <- run_omp_sub(2L)
 stopifnot(
-  identical(r1$gi, r4$gi),
-  identical(r1$ni, r4$ni),
-  max(abs(r1$g - r4$g)) == 0.0,
-  max(abs(r1$n - r4$n)) == 0.0
+  identical(r1$gi, r2$gi),
+  identical(r1$ni, r2$ni),
+  max(abs(r1$g - r2$g)) == 0.0,
+  max(abs(r1$n - r2$n)) == 0.0
 )
 
 cat("OPENMP BITWISE DETERMINISM TESTS PASS\n")

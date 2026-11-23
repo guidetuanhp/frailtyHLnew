@@ -4,31 +4,32 @@
  */
 #include "fhl_core.h"
 #include <stdint.h>
-#ifdef _WIN32
-#include <windows.h>
-#endif
 
 static int detect_physical_cores(void) {
 #ifdef _OPENMP
+    int limit = 0;
+    const char *env_lim = getenv("OMP_THREAD_LIMIT");
+    if (env_lim != NULL && env_lim[0] != '\0') {
+        limit = atoi(env_lim);
+    }
     const char *env_omp = getenv("OMP_NUM_THREADS");
     if (env_omp != NULL && env_omp[0] != '\0') {
         int m = omp_get_max_threads();
+        if (limit >= 1 && m > limit)
+            m = limit;
         return (m >= 1) ? m : 1;
     }
     int n = omp_get_num_procs();
-#elif defined(_WIN32)
-    SYSTEM_INFO si;
-    GetSystemInfo(&si);
-    int n = (int)si.dwNumberOfProcessors;
+    int def = (n >= 2) ? 2 : 1;
+    int max_t = omp_get_max_threads();
+    if (max_t >= 1 && def > max_t)
+        def = max_t;
+    if (limit >= 1 && def > limit)
+        def = limit;
+    return (def >= 1) ? def : 1;
 #else
-    int n = 1;
+    return 1;
 #endif
-    if (n <= 1)
-        return 1;
-    int half = n / 2;
-    if (half > 8)
-        half = 8;
-    return half >= 1 ? half : 1;
 }
 
 /* ============================================================================
@@ -47,11 +48,7 @@ static int detect_physical_cores(void) {
 #define FHL_HAVE_AVX2_CLONE 1
 #define FHL_USE_AVX2_INTRINSICS 1
 #define FHL_K(n) n##_avx2
-#if defined(__clang__)
 #define FHL_KATTR __attribute__((target("avx2,fma")))
-#else
-#define FHL_KATTR __attribute__((target("avx2,fma"), optimize("O3", "fp-contract=fast")))
-#endif
 #include "fhl_kernels.h"
 #undef FHL_K
 #undef FHL_KATTR
