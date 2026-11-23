@@ -19,11 +19,10 @@ jobs:
       matrix:
         r: [release, devel]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Cache Rtools45 ARM64
-        id: cache-rtools
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: C:\rtools45-aarch64
           key: rtools45-aarch64-6768-6492
@@ -32,7 +31,7 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path "C:\rtools45-aarch64")) {
-            curl.exe -sSL -o rtools45.exe "https://github.com/r-windows/rtools-chocolatey/releases/download/6768/rtools45-aarch64-6768-6492.exe"
+            curl.exe -sSL --retry 3 -o rtools45.exe "https://github.com/r-windows/rtools-chocolatey/releases/download/6768/rtools45-aarch64-6768-6492.exe"
             Start-Process "rtools45.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES" -Wait
             Remove-Item rtools45.exe -Force
           }
@@ -52,14 +51,15 @@ jobs:
             $url = $asset.browser_download_url
           }
           Write-Host "Downloading R from $url"
-          curl.exe -sSL --retry 3 -o Rinstall.exe $url
+          curl.exe -sSL --retry 3 --ssl-no-revoke -o Rinstall.exe $url
           Start-Process "Rinstall.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /DIR=C:\R" -Wait
           Remove-Item Rinstall.exe -Force
           "C:\R\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install dependencies
-        shell: pwsh
+        shell: bash
         run: |
+          set -euo pipefail
           R --version
           R CMD config CC
           R CMD config SHLIB_OPENMP_CFLAGS
@@ -68,26 +68,35 @@ jobs:
       - name: Build & R CMD INSTALL --build (R-universe equivalent)
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           R CMD build .
           PKG_TAR=$(ls -1 frailtyHLnew_*.tar.gz | head -n 1)
           mkdir -p mylib
-          R CMD INSTALL "$PKG_TAR" --library=mylib --build 2>&1 | tee install.log
+          if ! R CMD INSTALL "$PKG_TAR" --library=mylib --build > install.log 2>&1; then
+            cat install.log
+            tail -n 35 install.log | while IFS= read -r line; do echo "::error::$line"; done
+            exit 1
+          fi
+          cat install.log
 
       - name: R CMD check
         shell: bash
         env:
           _R_CHECK_FORCE_SUGGESTS_: "FALSE"
           _R_CHECK_CRAN_INCOMING_: "FALSE"
+          _R_CHECK_CRAN_INCOMING_REMOTE_: "FALSE"
         run: |
+          set -uo pipefail
           PKG_TAR=$(ls -1 frailtyHLnew_*.tar.gz | head -n 1)
           if ! R CMD check "$PKG_TAR" --no-manual; then
-            echo "=== 00install.out ==="
             cat frailtyHLnew.Rcheck/00install.out || true
-            echo "=== 00check.log ==="
             cat frailtyHLnew.Rcheck/00check.log || true
+            grep -E "ERROR|WARNING|error:" frailtyHLnew.Rcheck/00install.out frailtyHLnew.Rcheck/00check.log 2>/dev/null | head -n 30 | while IFS= read -r line; do echo "::error::$line"; done
             for f in frailtyHLnew.Rcheck/tests/*.Rout.fail; do
-              [ -f "$f" ] && echo "=== $f ===" && cat "$f"
+              if [ -f "$f" ]; then
+                cat "$f"
+                tail -n 20 "$f" | while IFS= read -r line; do echo "::error::[$f] $line"; done
+              fi
             done
             exit 1
           fi
@@ -96,7 +105,7 @@ jobs:
     name: Linux Clang + OpenMP (--as-cran)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install R, Clang & libomp
         run: |
@@ -108,8 +117,10 @@ jobs:
           mkdir -p ~/.R
           cat << 'EOF' > ~/.R/Makevars
           CC = clang
+          SHLIB_LD = clang
           CFLAGS = -O2 -Wall -Wextra
           SHLIB_OPENMP_CFLAGS = -fopenmp
+          SHLIB_OPENMP_LDFLAGS = -fopenmp
           EOF
           clang --version
 
@@ -120,15 +131,21 @@ jobs:
       - name: Build & R CMD check --as-cran
         env:
           _R_CHECK_FORCE_SUGGESTS_: "FALSE"
+          _R_CHECK_CRAN_INCOMING_: "FALSE"
           _R_CHECK_CRAN_INCOMING_REMOTE_: "FALSE"
         run: |
+          set -uo pipefail
           R CMD build .
           PKG_TAR=$(ls -1 frailtyHLnew_*.tar.gz | head -n 1)
           if ! R CMD check "$PKG_TAR" --as-cran --no-manual; then
             cat frailtyHLnew.Rcheck/00install.out || true
             cat frailtyHLnew.Rcheck/00check.log || true
+            grep -E "ERROR|WARNING|error:|undefined symbol" frailtyHLnew.Rcheck/00install.out frailtyHLnew.Rcheck/00check.log 2>/dev/null | head -n 30 | while IFS= read -r line; do echo "::error::$line"; done
             for f in frailtyHLnew.Rcheck/tests/*.Rout.fail; do
-              [ -f "$f" ] && echo "=== $f ===" && cat "$f"
+              if [ -f "$f" ]; then
+                cat "$f"
+                tail -n 20 "$f" | while IFS= read -r line; do echo "::error::[$f] $line"; done
+              fi
             done
             exit 1
           fi
