@@ -57,49 +57,74 @@ jobs:
           "C:\R\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install dependencies
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
-          R --version
-          R CMD config CC
-          R CMD config SHLIB_OPENMP_CFLAGS
-          Rscript -e "tryCatch(install.packages('cmprsk', repos = 'https://cran.r-universe.dev'), error = function(e) message(conditionMessage(e))); if (!requireNamespace('cmprsk', quietly = TRUE)) install.packages('cmprsk', repos = 'https://cloud.r-project.org', type = 'source'); stopifnot(requireNamespace('cmprsk', quietly = TRUE))"
+          & C:\R\bin\Rscript.exe -e "
+            cat('R version:', R.version.string, '\n');
+            cat('Platform:', R.version[['platform']], '\n');
+            lib <- Sys.getenv('R_LIBS_USER');
+            if (!nzchar(lib)) lib <- file.path(Sys.getenv('RUNNER_TEMP'), 'rlib');
+            dir.create(lib, recursive = TRUE, showWarnings = FALSE);
+            .libPaths(c(lib, .libPaths()));
+            cat('libPaths:', paste(.libPaths(), collapse = '; '), '\n');
+            tryCatch(
+              install.packages('cmprsk', lib = lib, repos = 'https://cran.r-universe.dev'),
+              error = function(e) message('binary install note: ', conditionMessage(e))
+            );
+            if (!requireNamespace('cmprsk', quietly = TRUE)) {
+              install.packages('cmprsk', lib = lib, repos = 'https://cloud.r-project.org', type = 'source');
+            }
+            stopifnot(requireNamespace('cmprsk', quietly = TRUE));
+          " *> deps.log
+          $rc = $LASTEXITCODE
+          Get-Content deps.log
+          if ($rc -ne 0) {
+            Get-Content deps.log | Select-Object -Last 30 | ForEach-Object { Write-Host "::error::$_" }
+            exit $rc
+          }
+          $rlib = (& C:\R\bin\Rscript.exe -e "lib <- Sys.getenv('R_LIBS_USER'); if (!nzchar(lib)) lib <- file.path(Sys.getenv('RUNNER_TEMP'), 'rlib'); cat(normalizePath(lib, winslash = '/'))")
+          "R_LIBS_USER=$rlib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build & R CMD INSTALL --build (R-universe equivalent)
-        shell: bash
+        shell: pwsh
         run: |
-          set -uo pipefail
-          R CMD build .
-          PKG_TAR=$(ls -1 frailtyHLnew_*.tar.gz | head -n 1)
-          mkdir -p mylib
-          if ! R CMD INSTALL "$PKG_TAR" --library=mylib --build > install.log 2>&1; then
-            cat install.log
-            tail -n 35 install.log | while IFS= read -r line; do echo "::error::$line"; done
-            exit 1
-          fi
-          cat install.log
+          & C:\R\bin\R.exe CMD build .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $pkgTar = (Get-ChildItem "frailtyHLnew_*.tar.gz" | Select-Object -First 1).Name
+          New-Item -ItemType Directory -Path "mylib" -Force | Out-Null
+          & C:\R\bin\R.exe CMD INSTALL $pkgTar --library=mylib --build *> install.log
+          $rc = $LASTEXITCODE
+          Get-Content install.log
+          if ($rc -ne 0) {
+            Get-Content install.log | Select-Object -Last 35 | ForEach-Object { Write-Host "::error::$_" }
+            exit $rc
+          }
 
       - name: R CMD check
-        shell: bash
+        shell: pwsh
         env:
           _R_CHECK_FORCE_SUGGESTS_: "FALSE"
           _R_CHECK_CRAN_INCOMING_: "FALSE"
           _R_CHECK_CRAN_INCOMING_REMOTE_: "FALSE"
         run: |
-          set -uo pipefail
-          PKG_TAR=$(ls -1 frailtyHLnew_*.tar.gz | head -n 1)
-          if ! R CMD check "$PKG_TAR" --no-manual; then
-            cat frailtyHLnew.Rcheck/00install.out || true
-            cat frailtyHLnew.Rcheck/00check.log || true
-            grep -E "ERROR|WARNING|error:" frailtyHLnew.Rcheck/00install.out frailtyHLnew.Rcheck/00check.log 2>/dev/null | head -n 30 | while IFS= read -r line; do echo "::error::$line"; done
-            for f in frailtyHLnew.Rcheck/tests/*.Rout.fail; do
-              if [ -f "$f" ]; then
-                cat "$f"
-                tail -n 20 "$f" | while IFS= read -r line; do echo "::error::[$f] $line"; done
-              fi
-            done
-            exit 1
-          fi
+          $pkgTar = (Get-ChildItem "frailtyHLnew_*.tar.gz" | Select-Object -First 1).Name
+          & C:\R\bin\R.exe CMD check $pkgTar --no-manual
+          $rc = $LASTEXITCODE
+          if ($rc -ne 0) {
+            if (Test-Path "frailtyHLnew.Rcheck/00install.out") {
+              Get-Content "frailtyHLnew.Rcheck/00install.out"
+              Select-String -Path "frailtyHLnew.Rcheck/00install.out" -Pattern "ERROR|WARNING|error:" | Select-Object -First 25 | ForEach-Object { Write-Host "::error::[00install] $($_.Line)" }
+            }
+            if (Test-Path "frailtyHLnew.Rcheck/00check.log") {
+              Get-Content "frailtyHLnew.Rcheck/00check.log"
+              Select-String -Path "frailtyHLnew.Rcheck/00check.log" -Pattern "ERROR|WARNING" | Select-Object -First 25 | ForEach-Object { Write-Host "::error::[00check] $($_.Line)" }
+            }
+            Get-ChildItem "frailtyHLnew.Rcheck/tests/*.Rout.fail" -ErrorAction SilentlyContinue | ForEach-Object {
+              Get-Content $_.FullName
+              Get-Content $_.FullName | Select-Object -Last 20 | ForEach-Object { Write-Host "::error::[test] $_" }
+            }
+            exit $rc
+          }
 
   linux-clang-openmp:
     name: Linux Clang + OpenMP (--as-cran)

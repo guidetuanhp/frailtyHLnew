@@ -6,8 +6,50 @@
 #ifdef FHL_USE_AVX2_INTRINSICS
 #include <immintrin.h>
 
-static FHL_KATTR void FHL_K(simd_trsm_UT_left)(int kb, int rem, const double *U, int ldu,
-                                               double *panel, int ldp, int nth) {
+/* Leaf AVX2/FMA inner-panel helpers contain no `#pragma omp parallel` regions so
+   Clang does not outline non-AVX2 `.omp_outlined.` functions containing `__m256d`. */
+static FHL_KATTR void FHL_K(trsm_UT_col8_leaf)(int kb, int jmax, int j0, const double *U, int ldu,
+                                               double *panel, int ldp, double *Upack) {
+    if (jmax == 8) {
+        for (int jj = 0; jj < 8; jj++) {
+            const double *pj = panel + (size_t)ldp * (j0 + jj);
+            for (int i = 0; i < kb; i++)
+                Upack[i * 8 + jj] = pj[i];
+        }
+        for (int i = 0; i < kb; i++) {
+            const double *ui = U + (size_t)ldu * i;
+            __m256d s0 = _mm256_load_pd(Upack + i * 8);
+            __m256d s1 = _mm256_load_pd(Upack + i * 8 + 4);
+            for (int l = 0; l < i; l++) {
+                __m256d u = _mm256_set1_pd(ui[l]);
+                s0 = _mm256_fnmadd_pd(u, _mm256_load_pd(Upack + l * 8), s0);
+                s1 = _mm256_fnmadd_pd(u, _mm256_load_pd(Upack + l * 8 + 4), s1);
+            }
+            __m256d inv_d = _mm256_set1_pd(1.0 / ui[i]);
+            _mm256_store_pd(Upack + i * 8, _mm256_mul_pd(s0, inv_d));
+            _mm256_store_pd(Upack + i * 8 + 4, _mm256_mul_pd(s1, inv_d));
+        }
+        for (int jj = 0; jj < 8; jj++) {
+            double *pj = panel + (size_t)ldp * (j0 + jj);
+            for (int i = 0; i < kb; i++)
+                pj[i] = Upack[i * 8 + jj];
+        }
+    } else {
+        for (int jj = 0; jj < jmax; jj++) {
+            double *pj = panel + (size_t)ldp * (j0 + jj);
+            for (int i = 0; i < kb; i++) {
+                const double *ui = U + (size_t)ldu * i;
+                double s = 0;
+                for (int l = 0; l < i; l++)
+                    s += ui[l] * pj[l];
+                pj[i] = (pj[i] - s) / ui[i];
+            }
+        }
+    }
+}
+
+static void FHL_K(simd_trsm_UT_left)(int kb, int rem, const double *U, int ldu,
+                                     double *panel, int ldp, int nth) {
 #ifdef _OPENMP
 #pragma omp parallel num_threads(nth) if (rem >= 64)
 #else
@@ -20,48 +62,113 @@ static FHL_KATTR void FHL_K(simd_trsm_UT_left)(int kb, int rem, const double *U,
 #endif
         for (int j0 = 0; j0 < rem; j0 += 8) {
             int jmax = (rem - j0 < 8) ? (rem - j0) : 8;
-            if (jmax == 8) {
-                for (int jj = 0; jj < 8; jj++) {
-                    const double *pj = panel + (size_t)ldp * (j0 + jj);
-                    for (int i = 0; i < kb; i++)
-                        Upack[i * 8 + jj] = pj[i];
-                }
-                for (int i = 0; i < kb; i++) {
-                    const double *ui = U + (size_t)ldu * i;
-                    __m256d s0 = _mm256_load_pd(Upack + i * 8);
-                    __m256d s1 = _mm256_load_pd(Upack + i * 8 + 4);
-                    for (int l = 0; l < i; l++) {
-                        __m256d u = _mm256_set1_pd(ui[l]);
-                        s0 = _mm256_fnmadd_pd(u, _mm256_load_pd(Upack + l * 8), s0);
-                        s1 = _mm256_fnmadd_pd(u, _mm256_load_pd(Upack + l * 8 + 4), s1);
-                    }
-                    __m256d inv_d = _mm256_set1_pd(1.0 / ui[i]);
-                    _mm256_store_pd(Upack + i * 8, _mm256_mul_pd(s0, inv_d));
-                    _mm256_store_pd(Upack + i * 8 + 4, _mm256_mul_pd(s1, inv_d));
-                }
-                for (int jj = 0; jj < 8; jj++) {
-                    double *pj = panel + (size_t)ldp * (j0 + jj);
-                    for (int i = 0; i < kb; i++)
-                        pj[i] = Upack[i * 8 + jj];
-                }
-            } else {
-                for (int jj = 0; jj < jmax; jj++) {
-                    double *pj = panel + (size_t)ldp * (j0 + jj);
-                    for (int i = 0; i < kb; i++) {
-                        const double *ui = U + (size_t)ldu * i;
-                        double s = 0;
-                        for (int l = 0; l < i; l++)
-                            s += ui[l] * pj[l];
-                        pj[i] = (pj[i] - s) / ui[i];
-                    }
-                }
+            FHL_K(trsm_UT_col8_leaf)(kb, jmax, j0, U, ldu, panel, ldp, Upack);
+        }
+    }
+}
+
+static FHL_KATTR void FHL_K(syrk_upper_blk8_leaf)(int kb, int rem, int i0, int imax,
+                                                  const double *panel, int ldp, double *C, int ldc,
+                                                  double *Apack) {
+    if (imax == 8) {
+        const double *p0 = panel + (size_t)ldp * (i0 + 0),
+                     *p1 = panel + (size_t)ldp * (i0 + 1);
+        const double *p2 = panel + (size_t)ldp * (i0 + 2),
+                     *p3 = panel + (size_t)ldp * (i0 + 3);
+        const double *p4 = panel + (size_t)ldp * (i0 + 4),
+                     *p5 = panel + (size_t)ldp * (i0 + 5);
+        const double *p6 = panel + (size_t)ldp * (i0 + 6),
+                     *p7 = panel + (size_t)ldp * (i0 + 7);
+        for (int l = 0; l < kb; l++) {
+            double *ap = Apack + l * 8;
+            ap[0] = p0[l];
+            ap[1] = p1[l];
+            ap[2] = p2[l];
+            ap[3] = p3[l];
+            ap[4] = p4[l];
+            ap[5] = p5[l];
+            ap[6] = p6[l];
+            ap[7] = p7[l];
+        }
+        for (int j = i0; j < i0 + 8; j++) {
+            const double *pj = panel + (size_t)ldp * j;
+            double *cj = C + (size_t)ldc * j;
+            for (int ii = i0; ii <= j; ii++) {
+                const double *pi = panel + (size_t)ldp * ii;
+                double s = 0;
+                for (int l = 0; l < kb; l++)
+                    s += pi[l] * pj[l];
+                cj[ii] -= s;
+            }
+        }
+        int j0 = i0 + 8;
+        for (; j0 + 3 < rem; j0 += 4) {
+            const double *bj0 = panel + (size_t)ldp * (j0 + 0),
+                         *bj1 = panel + (size_t)ldp * (j0 + 1);
+            const double *bj2 = panel + (size_t)ldp * (j0 + 2),
+                         *bj3 = panel + (size_t)ldp * (j0 + 3);
+            __m256d c00 = _mm256_loadu_pd(C + i0 + (size_t)ldc * (j0 + 0)),
+                    c10 = _mm256_loadu_pd(C + i0 + 4 + (size_t)ldc * (j0 + 0));
+            __m256d c01 = _mm256_loadu_pd(C + i0 + (size_t)ldc * (j0 + 1)),
+                    c11 = _mm256_loadu_pd(C + i0 + 4 + (size_t)ldc * (j0 + 1));
+            __m256d c02 = _mm256_loadu_pd(C + i0 + (size_t)ldc * (j0 + 2)),
+                    c12 = _mm256_loadu_pd(C + i0 + 4 + (size_t)ldc * (j0 + 2));
+            __m256d c03 = _mm256_loadu_pd(C + i0 + (size_t)ldc * (j0 + 3)),
+                    c13 = _mm256_loadu_pd(C + i0 + 4 + (size_t)ldc * (j0 + 3));
+            for (int l = 0; l < kb; l++) {
+                const double *ap = Apack + l * 8;
+                __m256d av0 = _mm256_load_pd(ap), av1 = _mm256_load_pd(ap + 4);
+                __m256d b0 = _mm256_set1_pd(bj0[l]), b1 = _mm256_set1_pd(bj1[l]);
+                __m256d b2 = _mm256_set1_pd(bj2[l]), b3 = _mm256_set1_pd(bj3[l]);
+                c00 = _mm256_fnmadd_pd(av0, b0, c00);
+                c10 = _mm256_fnmadd_pd(av1, b0, c10);
+                c01 = _mm256_fnmadd_pd(av0, b1, c01);
+                c11 = _mm256_fnmadd_pd(av1, b1, c11);
+                c02 = _mm256_fnmadd_pd(av0, b2, c02);
+                c12 = _mm256_fnmadd_pd(av1, b2, c12);
+                c03 = _mm256_fnmadd_pd(av0, b3, c03);
+                c13 = _mm256_fnmadd_pd(av1, b3, c13);
+            }
+            _mm256_storeu_pd(C + i0 + (size_t)ldc * (j0 + 0), c00);
+            _mm256_storeu_pd(C + i0 + 4 + (size_t)ldc * (j0 + 0), c10);
+            _mm256_storeu_pd(C + i0 + (size_t)ldc * (j0 + 1), c01);
+            _mm256_storeu_pd(C + i0 + 4 + (size_t)ldc * (j0 + 1), c11);
+            _mm256_storeu_pd(C + i0 + (size_t)ldc * (j0 + 2), c02);
+            _mm256_storeu_pd(C + i0 + 4 + (size_t)ldc * (j0 + 2), c12);
+            _mm256_storeu_pd(C + i0 + (size_t)ldc * (j0 + 3), c03);
+            _mm256_storeu_pd(C + i0 + 4 + (size_t)ldc * (j0 + 3), c13);
+        }
+        for (; j0 < rem; j0++) {
+            const double *bj = panel + (size_t)ldp * j0;
+            __m256d c0 = _mm256_loadu_pd(C + i0 + (size_t)ldc * j0),
+                    c1 = _mm256_loadu_pd(C + i0 + 4 + (size_t)ldc * j0);
+            for (int l = 0; l < kb; l++) {
+                const double *ap = Apack + l * 8;
+                __m256d b0 = _mm256_set1_pd(bj[l]);
+                c0 = _mm256_fnmadd_pd(_mm256_load_pd(ap), b0, c0);
+                c1 = _mm256_fnmadd_pd(_mm256_load_pd(ap + 4), b0, c1);
+            }
+            _mm256_storeu_pd(C + i0 + (size_t)ldc * j0, c0);
+            _mm256_storeu_pd(C + i0 + 4 + (size_t)ldc * j0, c1);
+        }
+    } else {
+        for (int j = i0; j < rem; j++) {
+            const double *pj = panel + (size_t)ldp * j;
+            double *cj = C + (size_t)ldc * j;
+            int iend = (j < i0 + imax - 1) ? j : (i0 + imax - 1);
+            for (int ii = i0; ii <= iend; ii++) {
+                const double *pi = panel + (size_t)ldp * ii;
+                double s = 0;
+                for (int l = 0; l < kb; l++)
+                    s += pi[l] * pj[l];
+                cj[ii] -= s;
             }
         }
     }
 }
 
-static FHL_KATTR void FHL_K(simd_syrk_upper_panel)(int kb, int rem, const double *panel, int ldp,
-                                                   double *C, int ldc, int nth) {
+static void FHL_K(simd_syrk_upper_panel)(int kb, int rem, const double *panel, int ldp,
+                                         double *C, int ldc, int nth) {
 #ifdef _OPENMP
 #pragma omp parallel num_threads(nth) if (rem >= 64)
 #else
@@ -74,101 +181,7 @@ static FHL_KATTR void FHL_K(simd_syrk_upper_panel)(int kb, int rem, const double
 #endif
         for (int i0 = 0; i0 < rem; i0 += 8) {
             int imax = (rem - i0 < 8) ? (rem - i0) : 8;
-            if (imax == 8) {
-                const double *p0 = panel + (size_t)ldp * (i0 + 0),
-                             *p1 = panel + (size_t)ldp * (i0 + 1);
-                const double *p2 = panel + (size_t)ldp * (i0 + 2),
-                             *p3 = panel + (size_t)ldp * (i0 + 3);
-                const double *p4 = panel + (size_t)ldp * (i0 + 4),
-                             *p5 = panel + (size_t)ldp * (i0 + 5);
-                const double *p6 = panel + (size_t)ldp * (i0 + 6),
-                             *p7 = panel + (size_t)ldp * (i0 + 7);
-                for (int l = 0; l < kb; l++) {
-                    double *ap = Apack + l * 8;
-                    ap[0] = p0[l];
-                    ap[1] = p1[l];
-                    ap[2] = p2[l];
-                    ap[3] = p3[l];
-                    ap[4] = p4[l];
-                    ap[5] = p5[l];
-                    ap[6] = p6[l];
-                    ap[7] = p7[l];
-                }
-                for (int j = i0; j < i0 + 8; j++) {
-                    const double *pj = panel + (size_t)ldp * j;
-                    double *cj = C + (size_t)ldc * j;
-                    for (int ii = i0; ii <= j; ii++) {
-                        const double *pi = panel + (size_t)ldp * ii;
-                        double s = 0;
-                        for (int l = 0; l < kb; l++)
-                            s += pi[l] * pj[l];
-                        cj[ii] -= s;
-                    }
-                }
-                int j0 = i0 + 8;
-                for (; j0 + 3 < rem; j0 += 4) {
-                    const double *bj0 = panel + (size_t)ldp * (j0 + 0),
-                                 *bj1 = panel + (size_t)ldp * (j0 + 1);
-                    const double *bj2 = panel + (size_t)ldp * (j0 + 2),
-                                 *bj3 = panel + (size_t)ldp * (j0 + 3);
-                    __m256d c00 = _mm256_loadu_pd(C + i0 + (size_t)ldc * (j0 + 0)),
-                            c10 = _mm256_loadu_pd(C + i0 + 4 + (size_t)ldc * (j0 + 0));
-                    __m256d c01 = _mm256_loadu_pd(C + i0 + (size_t)ldc * (j0 + 1)),
-                            c11 = _mm256_loadu_pd(C + i0 + 4 + (size_t)ldc * (j0 + 1));
-                    __m256d c02 = _mm256_loadu_pd(C + i0 + (size_t)ldc * (j0 + 2)),
-                            c12 = _mm256_loadu_pd(C + i0 + 4 + (size_t)ldc * (j0 + 2));
-                    __m256d c03 = _mm256_loadu_pd(C + i0 + (size_t)ldc * (j0 + 3)),
-                            c13 = _mm256_loadu_pd(C + i0 + 4 + (size_t)ldc * (j0 + 3));
-                    for (int l = 0; l < kb; l++) {
-                        const double *ap = Apack + l * 8;
-                        __m256d av0 = _mm256_load_pd(ap), av1 = _mm256_load_pd(ap + 4);
-                        __m256d b0 = _mm256_set1_pd(bj0[l]), b1 = _mm256_set1_pd(bj1[l]);
-                        __m256d b2 = _mm256_set1_pd(bj2[l]), b3 = _mm256_set1_pd(bj3[l]);
-                        c00 = _mm256_fnmadd_pd(av0, b0, c00);
-                        c10 = _mm256_fnmadd_pd(av1, b0, c10);
-                        c01 = _mm256_fnmadd_pd(av0, b1, c01);
-                        c11 = _mm256_fnmadd_pd(av1, b1, c11);
-                        c02 = _mm256_fnmadd_pd(av0, b2, c02);
-                        c12 = _mm256_fnmadd_pd(av1, b2, c12);
-                        c03 = _mm256_fnmadd_pd(av0, b3, c03);
-                        c13 = _mm256_fnmadd_pd(av1, b3, c13);
-                    }
-                    _mm256_storeu_pd(C + i0 + (size_t)ldc * (j0 + 0), c00);
-                    _mm256_storeu_pd(C + i0 + 4 + (size_t)ldc * (j0 + 0), c10);
-                    _mm256_storeu_pd(C + i0 + (size_t)ldc * (j0 + 1), c01);
-                    _mm256_storeu_pd(C + i0 + 4 + (size_t)ldc * (j0 + 1), c11);
-                    _mm256_storeu_pd(C + i0 + (size_t)ldc * (j0 + 2), c02);
-                    _mm256_storeu_pd(C + i0 + 4 + (size_t)ldc * (j0 + 2), c12);
-                    _mm256_storeu_pd(C + i0 + (size_t)ldc * (j0 + 3), c03);
-                    _mm256_storeu_pd(C + i0 + 4 + (size_t)ldc * (j0 + 3), c13);
-                }
-                for (; j0 < rem; j0++) {
-                    const double *bj = panel + (size_t)ldp * j0;
-                    __m256d c0 = _mm256_loadu_pd(C + i0 + (size_t)ldc * j0),
-                            c1 = _mm256_loadu_pd(C + i0 + 4 + (size_t)ldc * j0);
-                    for (int l = 0; l < kb; l++) {
-                        const double *ap = Apack + l * 8;
-                        __m256d b0 = _mm256_set1_pd(bj[l]);
-                        c0 = _mm256_fnmadd_pd(_mm256_load_pd(ap), b0, c0);
-                        c1 = _mm256_fnmadd_pd(_mm256_load_pd(ap + 4), b0, c1);
-                    }
-                    _mm256_storeu_pd(C + i0 + (size_t)ldc * j0, c0);
-                    _mm256_storeu_pd(C + i0 + 4 + (size_t)ldc * j0, c1);
-                }
-            } else {
-                for (int j = i0; j < rem; j++) {
-                    const double *pj = panel + (size_t)ldp * j;
-                    double *cj = C + (size_t)ldc * j;
-                    int iend = (j < i0 + imax - 1) ? j : (i0 + imax - 1);
-                    for (int ii = i0; ii <= iend; ii++) {
-                        const double *pi = panel + (size_t)ldp * ii;
-                        double s = 0;
-                        for (int l = 0; l < kb; l++)
-                            s += pi[l] * pj[l];
-                        cj[ii] -= s;
-                    }
-                }
-            }
+            FHL_K(syrk_upper_blk8_leaf)(kb, rem, i0, imax, panel, ldp, C, ldc, Apack);
         }
     }
 }
@@ -211,8 +224,102 @@ static FHL_KATTR int FHL_K(portable_potrf_upper)(int r, double *U, int nth) {
     return 0;
 }
 
-static FHL_KATTR void FHL_K(portable_potri_from_U)(int r, const double *U, double *inv,
-                                                   double *Rpack, double *inv_diag, int nth) {
+static FHL_KATTR void FHL_K(potri_trtri_panel_leaf)(int r, int p_id, const double *U,
+                                                    double *Rpack, const double *inv_diag) {
+    int i0 = p_id * 8;
+    int imax = (r - i0 < 8) ? (r - i0) : 8;
+    double *rp = Rpack + (size_t)p_id * r * 8;
+    for (int j = i0; j < i0 + imax; j++) {
+        double *dst = rp + (size_t)j * 8;
+        for (int ii = 0; ii < 8; ii++)
+            dst[ii] = 0.0;
+    }
+    for (int ii = 0; ii < imax; ii++) {
+        int row = i0 + ii;
+        rp[(size_t)row * 8 + ii] = inv_diag[row];
+        for (int j = row + 1; j < i0 + imax; j++) {
+            const double *uj = U + (size_t)r * j;
+            double s = 0;
+            for (int l = row; l < j; l++)
+                s += rp[(size_t)l * 8 + ii] * uj[l];
+            rp[(size_t)j * 8 + ii] = -s * inv_diag[j];
+        }
+    }
+    for (int j = i0 + imax; j < r; j++) {
+        const double *uj = U + (size_t)r * j;
+        __m256d s0 = _mm256_setzero_pd(), s1 = _mm256_setzero_pd();
+        for (int l = i0; l < j; l++) {
+            const double *rl = rp + (size_t)l * 8;
+            __m256d u = _mm256_set1_pd(uj[l]);
+            s0 = _mm256_fmadd_pd(_mm256_loadu_pd(rl), u, s0);
+            s1 = _mm256_fmadd_pd(_mm256_loadu_pd(rl + 4), u, s1);
+        }
+        __m256d id = _mm256_set1_pd(-inv_diag[j]);
+        _mm256_storeu_pd(rp + (size_t)j * 8, _mm256_mul_pd(s0, id));
+        _mm256_storeu_pd(rp + (size_t)j * 8 + 4, _mm256_mul_pd(s1, id));
+    }
+}
+
+static FHL_KATTR void FHL_K(potri_lauum_panel_leaf)(int r, int n_panels, int p_i,
+                                                    const double *Rpack, double *inv) {
+    int i0 = p_i * 8;
+    int imax = (r - i0 < 8) ? (r - i0) : 8;
+    const double *rpi = Rpack + (size_t)p_i * r * 8;
+    for (int p_j = p_i; p_j < n_panels; p_j++) {
+        int j0 = p_j * 8;
+        int jmax = (r - j0 < 8) ? (r - j0) : 8;
+        const double *rpj = Rpack + (size_t)p_j * r * 8;
+        if (imax == 8 && jmax == 8) {
+            for (int half = 0; half < 8; half += 4) {
+                int jb = j0 + half;
+                __m256d c00 = _mm256_setzero_pd(), c10 = _mm256_setzero_pd();
+                __m256d c01 = _mm256_setzero_pd(), c11 = _mm256_setzero_pd();
+                __m256d c02 = _mm256_setzero_pd(), c12 = _mm256_setzero_pd();
+                __m256d c03 = _mm256_setzero_pd(), c13 = _mm256_setzero_pd();
+                for (int l = jb; l < r; l++) {
+                    const double *ai = rpi + (size_t)l * 8;
+                    const double *bj = rpj + (size_t)l * 8 + half;
+                    __m256d av0 = _mm256_loadu_pd(ai), av1 = _mm256_loadu_pd(ai + 4);
+                    __m256d b0 = _mm256_set1_pd(bj[0]), b1 = _mm256_set1_pd(bj[1]);
+                    __m256d b2 = _mm256_set1_pd(bj[2]), b3 = _mm256_set1_pd(bj[3]);
+                    c00 = _mm256_fmadd_pd(av0, b0, c00);
+                    c10 = _mm256_fmadd_pd(av1, b0, c10);
+                    c01 = _mm256_fmadd_pd(av0, b1, c01);
+                    c11 = _mm256_fmadd_pd(av1, b1, c11);
+                    c02 = _mm256_fmadd_pd(av0, b2, c02);
+                    c12 = _mm256_fmadd_pd(av1, b2, c12);
+                    c03 = _mm256_fmadd_pd(av0, b3, c03);
+                    c13 = _mm256_fmadd_pd(av1, b3, c13);
+                }
+                _mm256_storeu_pd(inv + i0 + (size_t)r * (jb + 0), c00);
+                _mm256_storeu_pd(inv + i0 + 4 + (size_t)r * (jb + 0), c10);
+                _mm256_storeu_pd(inv + i0 + (size_t)r * (jb + 1), c01);
+                _mm256_storeu_pd(inv + i0 + 4 + (size_t)r * (jb + 1), c11);
+                _mm256_storeu_pd(inv + i0 + (size_t)r * (jb + 2), c02);
+                _mm256_storeu_pd(inv + i0 + 4 + (size_t)r * (jb + 2), c12);
+                _mm256_storeu_pd(inv + i0 + (size_t)r * (jb + 3), c03);
+                _mm256_storeu_pd(inv + i0 + 4 + (size_t)r * (jb + 3), c13);
+            }
+        } else {
+            for (int jj = 0; jj < jmax; jj++) {
+                int j = j0 + jj;
+                double *cj = inv + (size_t)r * j;
+                for (int ii = 0; ii < imax; ii++) {
+                    int i = i0 + ii;
+                    if (i <= j) {
+                        double s = 0;
+                        for (int l = j; l < r; l++)
+                            s += rpi[(size_t)l * 8 + ii] * rpj[(size_t)l * 8 + jj];
+                        cj[i] = s;
+                    }
+                }
+            }
+        }
+    }
+}
+
+static void FHL_K(portable_potri_from_U)(int r, const double *U, double *inv,
+                                         double *Rpack, double *inv_diag, int nth) {
     for (int j = 0; j < r; j++)
         inv_diag[j] = 1.0 / U[j + (size_t)r * j];
     int n_panels = (r + 7) / 8;
@@ -222,102 +329,135 @@ static FHL_KATTR void FHL_K(portable_potri_from_U)(int r, const double *U, doubl
     (void)nth;
 #endif
     for (int p_id = 0; p_id < n_panels; p_id++) {
-        int i0 = p_id * 8;
-        int imax = (r - i0 < 8) ? (r - i0) : 8;
-        double *rp = Rpack + (size_t)p_id * r * 8;
-        for (int j = i0; j < i0 + imax; j++) {
-            double *dst = rp + (size_t)j * 8;
-            for (int ii = 0; ii < 8; ii++)
-                dst[ii] = 0.0;
-        }
-        for (int ii = 0; ii < imax; ii++) {
-            int row = i0 + ii;
-            rp[(size_t)row * 8 + ii] = inv_diag[row];
-            for (int j = row + 1; j < i0 + imax; j++) {
-                const double *uj = U + (size_t)r * j;
-                double s = 0;
-                for (int l = row; l < j; l++)
-                    s += rp[(size_t)l * 8 + ii] * uj[l];
-                rp[(size_t)j * 8 + ii] = -s * inv_diag[j];
-            }
-        }
-        for (int j = i0 + imax; j < r; j++) {
-            const double *uj = U + (size_t)r * j;
-            __m256d s0 = _mm256_setzero_pd(), s1 = _mm256_setzero_pd();
-            for (int l = i0; l < j; l++) {
-                const double *rl = rp + (size_t)l * 8;
-                __m256d u = _mm256_set1_pd(uj[l]);
-                s0 = _mm256_fmadd_pd(_mm256_loadu_pd(rl), u, s0);
-                s1 = _mm256_fmadd_pd(_mm256_loadu_pd(rl + 4), u, s1);
-            }
-            __m256d id = _mm256_set1_pd(-inv_diag[j]);
-            _mm256_storeu_pd(rp + (size_t)j * 8, _mm256_mul_pd(s0, id));
-            _mm256_storeu_pd(rp + (size_t)j * 8 + 4, _mm256_mul_pd(s1, id));
-        }
+        FHL_K(potri_trtri_panel_leaf)(r, p_id, U, Rpack, inv_diag);
     }
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1) num_threads(nth)
 #endif
     for (int p_i = 0; p_i < n_panels; p_i++) {
-        int i0 = p_i * 8;
-        int imax = (r - i0 < 8) ? (r - i0) : 8;
-        const double *rpi = Rpack + (size_t)p_i * r * 8;
-        for (int p_j = p_i; p_j < n_panels; p_j++) {
-            int j0 = p_j * 8;
-            int jmax = (r - j0 < 8) ? (r - j0) : 8;
-            const double *rpj = Rpack + (size_t)p_j * r * 8;
-            if (imax == 8 && jmax == 8) {
-                for (int half = 0; half < 8; half += 4) {
-                    int jb = j0 + half;
-                    __m256d c00 = _mm256_setzero_pd(), c10 = _mm256_setzero_pd();
-                    __m256d c01 = _mm256_setzero_pd(), c11 = _mm256_setzero_pd();
-                    __m256d c02 = _mm256_setzero_pd(), c12 = _mm256_setzero_pd();
-                    __m256d c03 = _mm256_setzero_pd(), c13 = _mm256_setzero_pd();
-                    for (int l = jb; l < r; l++) {
-                        const double *ai = rpi + (size_t)l * 8;
-                        const double *bj = rpj + (size_t)l * 8 + half;
-                        __m256d av0 = _mm256_loadu_pd(ai), av1 = _mm256_loadu_pd(ai + 4);
-                        __m256d b0 = _mm256_set1_pd(bj[0]), b1 = _mm256_set1_pd(bj[1]);
-                        __m256d b2 = _mm256_set1_pd(bj[2]), b3 = _mm256_set1_pd(bj[3]);
-                        c00 = _mm256_fmadd_pd(av0, b0, c00);
-                        c10 = _mm256_fmadd_pd(av1, b0, c10);
-                        c01 = _mm256_fmadd_pd(av0, b1, c01);
-                        c11 = _mm256_fmadd_pd(av1, b1, c11);
-                        c02 = _mm256_fmadd_pd(av0, b2, c02);
-                        c12 = _mm256_fmadd_pd(av1, b2, c12);
-                        c03 = _mm256_fmadd_pd(av0, b3, c03);
-                        c13 = _mm256_fmadd_pd(av1, b3, c13);
-                    }
-                    _mm256_storeu_pd(inv + i0 + (size_t)r * (jb + 0), c00);
-                    _mm256_storeu_pd(inv + i0 + 4 + (size_t)r * (jb + 0), c10);
-                    _mm256_storeu_pd(inv + i0 + (size_t)r * (jb + 1), c01);
-                    _mm256_storeu_pd(inv + i0 + 4 + (size_t)r * (jb + 1), c11);
-                    _mm256_storeu_pd(inv + i0 + (size_t)r * (jb + 2), c02);
-                    _mm256_storeu_pd(inv + i0 + 4 + (size_t)r * (jb + 2), c12);
-                    _mm256_storeu_pd(inv + i0 + (size_t)r * (jb + 3), c03);
-                    _mm256_storeu_pd(inv + i0 + 4 + (size_t)r * (jb + 3), c13);
+        FHL_K(potri_lauum_panel_leaf)(r, n_panels, p_i, Rpack, inv);
+    }
+}
+
+static FHL_KATTR void FHL_K(symm_left_mc_leaf)(int r, int im, int kc, int mc,
+                                               const double *A, const double *B, double *C,
+                                               double *Apack) {
+    int m_len = (r - im < mc) ? (r - im) : mc;
+    for (int l0 = 0; l0 < r; l0 += kc) {
+        int lmax = (r - l0 < kc) ? (r - l0) : kc;
+        int p_idx = 0;
+        for (int ii = 0; ii + 7 < m_len; ii += 8, p_idx++) {
+            int i0 = im + ii;
+            const double *a0 = A + l0 + (size_t)r * (i0 + 0),
+                         *a1 = A + l0 + (size_t)r * (i0 + 1);
+            const double *a2 = A + l0 + (size_t)r * (i0 + 2),
+                         *a3 = A + l0 + (size_t)r * (i0 + 3);
+            const double *a4 = A + l0 + (size_t)r * (i0 + 4),
+                         *a5 = A + l0 + (size_t)r * (i0 + 5);
+            const double *a6 = A + l0 + (size_t)r * (i0 + 6),
+                         *a7 = A + l0 + (size_t)r * (i0 + 7);
+            double *ap_base = Apack + (size_t)p_idx * (8 * lmax);
+            for (int l = 0; l < lmax; l++) {
+                double *p = ap_base + (size_t)l * 8;
+                p[0] = a0[l];
+                p[1] = a1[l];
+                p[2] = a2[l];
+                p[3] = a3[l];
+                p[4] = a4[l];
+                p[5] = a5[l];
+                p[6] = a6[l];
+                p[7] = a7[l];
+            }
+        }
+        int j0 = 0;
+        for (; j0 + 3 < r; j0 += 4) {
+            const double *bj0 = B + l0 + (size_t)r * (j0 + 0),
+                         *bj1 = B + l0 + (size_t)r * (j0 + 1);
+            const double *bj2 = B + l0 + (size_t)r * (j0 + 2),
+                         *bj3 = B + l0 + (size_t)r * (j0 + 3);
+            int ii = 0, pid = 0;
+            for (; ii + 7 < m_len; ii += 8, pid++) {
+                int i0 = im + ii;
+                const double *ap_base = Apack + (size_t)pid * (8 * lmax);
+                __m256d c00, c10, c01, c11, c02, c12, c03, c13;
+                if (l0 == 0) {
+                    c00 = _mm256_setzero_pd();
+                    c10 = _mm256_setzero_pd();
+                    c01 = _mm256_setzero_pd();
+                    c11 = _mm256_setzero_pd();
+                    c02 = _mm256_setzero_pd();
+                    c12 = _mm256_setzero_pd();
+                    c03 = _mm256_setzero_pd();
+                    c13 = _mm256_setzero_pd();
+                } else {
+                    c00 = _mm256_loadu_pd(C + i0 + (size_t)r * (j0 + 0));
+                    c10 = _mm256_loadu_pd(C + i0 + 4 + (size_t)r * (j0 + 0));
+                    c01 = _mm256_loadu_pd(C + i0 + (size_t)r * (j0 + 1));
+                    c11 = _mm256_loadu_pd(C + i0 + 4 + (size_t)r * (j0 + 1));
+                    c02 = _mm256_loadu_pd(C + i0 + (size_t)r * (j0 + 2));
+                    c12 = _mm256_loadu_pd(C + i0 + 4 + (size_t)r * (j0 + 2));
+                    c03 = _mm256_loadu_pd(C + i0 + (size_t)r * (j0 + 3));
+                    c13 = _mm256_loadu_pd(C + i0 + 4 + (size_t)r * (j0 + 3));
                 }
-            } else {
-                for (int jj = 0; jj < jmax; jj++) {
-                    int j = j0 + jj;
-                    double *cj = inv + (size_t)r * j;
-                    for (int ii = 0; ii < imax; ii++) {
-                        int i = i0 + ii;
-                        if (i <= j) {
-                            double s = 0;
-                            for (int l = j; l < r; l++)
-                                s += rpi[(size_t)l * 8 + ii] * rpj[(size_t)l * 8 + jj];
-                            cj[i] = s;
-                        }
-                    }
+                for (int l = 0; l < lmax; l++) {
+                    const double *ap = ap_base + (size_t)l * 8;
+                    __m256d av0 = _mm256_load_pd(ap), av1 = _mm256_load_pd(ap + 4);
+                    __m256d b0 = _mm256_set1_pd(bj0[l]), b1 = _mm256_set1_pd(bj1[l]);
+                    __m256d b2 = _mm256_set1_pd(bj2[l]), b3 = _mm256_set1_pd(bj3[l]);
+                    c00 = _mm256_fmadd_pd(av0, b0, c00);
+                    c10 = _mm256_fmadd_pd(av1, b0, c10);
+                    c01 = _mm256_fmadd_pd(av0, b1, c01);
+                    c11 = _mm256_fmadd_pd(av1, b1, c11);
+                    c02 = _mm256_fmadd_pd(av0, b2, c02);
+                    c12 = _mm256_fmadd_pd(av1, b2, c12);
+                    c03 = _mm256_fmadd_pd(av0, b3, c03);
+                    c13 = _mm256_fmadd_pd(av1, b3, c13);
                 }
+                _mm256_storeu_pd(C + i0 + (size_t)r * (j0 + 0), c00);
+                _mm256_storeu_pd(C + i0 + 4 + (size_t)r * (j0 + 0), c10);
+                _mm256_storeu_pd(C + i0 + (size_t)r * (j0 + 1), c01);
+                _mm256_storeu_pd(C + i0 + 4 + (size_t)r * (j0 + 1), c11);
+                _mm256_storeu_pd(C + i0 + (size_t)r * (j0 + 2), c02);
+                _mm256_storeu_pd(C + i0 + 4 + (size_t)r * (j0 + 2), c12);
+                _mm256_storeu_pd(C + i0 + (size_t)r * (j0 + 3), c03);
+                _mm256_storeu_pd(C + i0 + 4 + (size_t)r * (j0 + 3), c13);
+            }
+            for (; ii < m_len; ii++) {
+                int i = im + ii;
+                const double *ai = A + l0 + (size_t)r * i;
+                double s0 = (l0 == 0) ? 0 : C[i + (size_t)r * (j0 + 0)],
+                       s1 = (l0 == 0) ? 0 : C[i + (size_t)r * (j0 + 1)];
+                double s2 = (l0 == 0) ? 0 : C[i + (size_t)r * (j0 + 2)],
+                       s3 = (l0 == 0) ? 0 : C[i + (size_t)r * (j0 + 3)];
+                for (int l = 0; l < lmax; l++) {
+                    double a = ai[l];
+                    s0 += a * bj0[l];
+                    s1 += a * bj1[l];
+                    s2 += a * bj2[l];
+                    s3 += a * bj3[l];
+                }
+                C[i + (size_t)r * (j0 + 0)] = s0;
+                C[i + (size_t)r * (j0 + 1)] = s1;
+                C[i + (size_t)r * (j0 + 2)] = s2;
+                C[i + (size_t)r * (j0 + 3)] = s3;
+            }
+        }
+        for (; j0 < r; j0++) {
+            const double *bj = B + l0 + (size_t)r * j0;
+            for (int ii = 0; ii < m_len; ii++) {
+                int i = im + ii;
+                const double *ai = A + l0 + (size_t)r * i;
+                double s = (l0 == 0) ? 0 : C[i + (size_t)r * j0];
+                for (int l = 0; l < lmax; l++)
+                    s += ai[l] * bj[l];
+                C[i + (size_t)r * j0] = s;
             }
         }
     }
 }
 
-static FHL_KATTR void FHL_K(portable_symm_left)(int r, const double *A, const double *B, double *C,
-                                                int nth) {
+static void FHL_K(portable_symm_left)(int r, const double *A, const double *B, double *C,
+                                      int nth) {
     int kc = 256, mc = 32;
 #ifdef _OPENMP
 #pragma omp parallel num_threads(nth)
@@ -330,118 +470,7 @@ static FHL_KATTR void FHL_K(portable_symm_left)(int r, const double *A, const do
 #pragma omp for schedule(dynamic, 1)
 #endif
         for (int im = 0; im < r; im += mc) {
-            int m_len = (r - im < mc) ? (r - im) : mc;
-            for (int l0 = 0; l0 < r; l0 += kc) {
-                int lmax = (r - l0 < kc) ? (r - l0) : kc;
-                int p_idx = 0;
-                for (int ii = 0; ii + 7 < m_len; ii += 8, p_idx++) {
-                    int i0 = im + ii;
-                    const double *a0 = A + l0 + (size_t)r * (i0 + 0),
-                                 *a1 = A + l0 + (size_t)r * (i0 + 1);
-                    const double *a2 = A + l0 + (size_t)r * (i0 + 2),
-                                 *a3 = A + l0 + (size_t)r * (i0 + 3);
-                    const double *a4 = A + l0 + (size_t)r * (i0 + 4),
-                                 *a5 = A + l0 + (size_t)r * (i0 + 5);
-                    const double *a6 = A + l0 + (size_t)r * (i0 + 6),
-                                 *a7 = A + l0 + (size_t)r * (i0 + 7);
-                    double *ap_base = Apack + (size_t)p_idx * (8 * lmax);
-                    for (int l = 0; l < lmax; l++) {
-                        double *p = ap_base + (size_t)l * 8;
-                        p[0] = a0[l];
-                        p[1] = a1[l];
-                        p[2] = a2[l];
-                        p[3] = a3[l];
-                        p[4] = a4[l];
-                        p[5] = a5[l];
-                        p[6] = a6[l];
-                        p[7] = a7[l];
-                    }
-                }
-                int j0 = 0;
-                for (; j0 + 3 < r; j0 += 4) {
-                    const double *bj0 = B + l0 + (size_t)r * (j0 + 0),
-                                 *bj1 = B + l0 + (size_t)r * (j0 + 1);
-                    const double *bj2 = B + l0 + (size_t)r * (j0 + 2),
-                                 *bj3 = B + l0 + (size_t)r * (j0 + 3);
-                    int ii = 0, pid = 0;
-                    for (; ii + 7 < m_len; ii += 8, pid++) {
-                        int i0 = im + ii;
-                        const double *ap_base = Apack + (size_t)pid * (8 * lmax);
-                        __m256d c00, c10, c01, c11, c02, c12, c03, c13;
-                        if (l0 == 0) {
-                            c00 = _mm256_setzero_pd();
-                            c10 = _mm256_setzero_pd();
-                            c01 = _mm256_setzero_pd();
-                            c11 = _mm256_setzero_pd();
-                            c02 = _mm256_setzero_pd();
-                            c12 = _mm256_setzero_pd();
-                            c03 = _mm256_setzero_pd();
-                            c13 = _mm256_setzero_pd();
-                        } else {
-                            c00 = _mm256_loadu_pd(C + i0 + (size_t)r * (j0 + 0));
-                            c10 = _mm256_loadu_pd(C + i0 + 4 + (size_t)r * (j0 + 0));
-                            c01 = _mm256_loadu_pd(C + i0 + (size_t)r * (j0 + 1));
-                            c11 = _mm256_loadu_pd(C + i0 + 4 + (size_t)r * (j0 + 1));
-                            c02 = _mm256_loadu_pd(C + i0 + (size_t)r * (j0 + 2));
-                            c12 = _mm256_loadu_pd(C + i0 + 4 + (size_t)r * (j0 + 2));
-                            c03 = _mm256_loadu_pd(C + i0 + (size_t)r * (j0 + 3));
-                            c13 = _mm256_loadu_pd(C + i0 + 4 + (size_t)r * (j0 + 3));
-                        }
-                        for (int l = 0; l < lmax; l++) {
-                            const double *ap = ap_base + (size_t)l * 8;
-                            __m256d av0 = _mm256_load_pd(ap), av1 = _mm256_load_pd(ap + 4);
-                            __m256d b0 = _mm256_set1_pd(bj0[l]), b1 = _mm256_set1_pd(bj1[l]);
-                            __m256d b2 = _mm256_set1_pd(bj2[l]), b3 = _mm256_set1_pd(bj3[l]);
-                            c00 = _mm256_fmadd_pd(av0, b0, c00);
-                            c10 = _mm256_fmadd_pd(av1, b0, c10);
-                            c01 = _mm256_fmadd_pd(av0, b1, c01);
-                            c11 = _mm256_fmadd_pd(av1, b1, c11);
-                            c02 = _mm256_fmadd_pd(av0, b2, c02);
-                            c12 = _mm256_fmadd_pd(av1, b2, c12);
-                            c03 = _mm256_fmadd_pd(av0, b3, c03);
-                            c13 = _mm256_fmadd_pd(av1, b3, c13);
-                        }
-                        _mm256_storeu_pd(C + i0 + (size_t)r * (j0 + 0), c00);
-                        _mm256_storeu_pd(C + i0 + 4 + (size_t)r * (j0 + 0), c10);
-                        _mm256_storeu_pd(C + i0 + (size_t)r * (j0 + 1), c01);
-                        _mm256_storeu_pd(C + i0 + 4 + (size_t)r * (j0 + 1), c11);
-                        _mm256_storeu_pd(C + i0 + (size_t)r * (j0 + 2), c02);
-                        _mm256_storeu_pd(C + i0 + 4 + (size_t)r * (j0 + 2), c12);
-                        _mm256_storeu_pd(C + i0 + (size_t)r * (j0 + 3), c03);
-                        _mm256_storeu_pd(C + i0 + 4 + (size_t)r * (j0 + 3), c13);
-                    }
-                    for (; ii < m_len; ii++) {
-                        int i = im + ii;
-                        const double *ai = A + l0 + (size_t)r * i;
-                        double s0 = (l0 == 0) ? 0 : C[i + (size_t)r * (j0 + 0)],
-                               s1 = (l0 == 0) ? 0 : C[i + (size_t)r * (j0 + 1)];
-                        double s2 = (l0 == 0) ? 0 : C[i + (size_t)r * (j0 + 2)],
-                               s3 = (l0 == 0) ? 0 : C[i + (size_t)r * (j0 + 3)];
-                        for (int l = 0; l < lmax; l++) {
-                            double a = ai[l];
-                            s0 += a * bj0[l];
-                            s1 += a * bj1[l];
-                            s2 += a * bj2[l];
-                            s3 += a * bj3[l];
-                        }
-                        C[i + (size_t)r * (j0 + 0)] = s0;
-                        C[i + (size_t)r * (j0 + 1)] = s1;
-                        C[i + (size_t)r * (j0 + 2)] = s2;
-                        C[i + (size_t)r * (j0 + 3)] = s3;
-                    }
-                }
-                for (; j0 < r; j0++) {
-                    const double *bj = B + l0 + (size_t)r * j0;
-                    for (int ii = 0; ii < m_len; ii++) {
-                        int i = im + ii;
-                        const double *ai = A + l0 + (size_t)r * i;
-                        double s = (l0 == 0) ? 0 : C[i + (size_t)r * j0];
-                        for (int l = 0; l < lmax; l++)
-                            s += ai[l] * bj[l];
-                        C[i + (size_t)r * j0] = s;
-                    }
-                }
-            }
+            FHL_K(symm_left_mc_leaf)(r, im, kc, mc, A, B, C, Apack);
         }
     }
 }
