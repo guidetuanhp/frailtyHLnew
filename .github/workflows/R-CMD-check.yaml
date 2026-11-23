@@ -59,7 +59,8 @@ jobs:
       - name: Install dependencies
         shell: pwsh
         run: |
-          & C:\R\bin\Rscript.exe -e "
+          $depsScript = Join-Path $env:RUNNER_TEMP 'frailtyhlnew_dependencies.R'
+          $depsCode = @'
             cat('R version:', R.version.string, '\n');
             cat('Platform:', R.version[['platform']], '\n');
             lib <- Sys.getenv('R_LIBS_USER');
@@ -75,7 +76,9 @@ jobs:
               install.packages('cmprsk', lib = lib, repos = 'https://cloud.r-project.org', type = 'source');
             }
             stopifnot(requireNamespace('cmprsk', quietly = TRUE));
-          " *> deps.log
+          '@
+          [System.IO.File]::WriteAllText($depsScript, $depsCode, [System.Text.UTF8Encoding]::new($false))
+          & C:\R\bin\Rscript.exe $depsScript *> deps.log
           $rc = $LASTEXITCODE
           Get-Content deps.log
           if ($rc -ne 0) {
