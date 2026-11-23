@@ -1228,9 +1228,10 @@ SEXP fhl_fit_competing_risks(SEXP X_s, SEXP group_s, SEXP n_s, SEXP time_s, SEXP
                 } else {
                     const double *P1 = Hinv_dH_store[q1];
                     const double *P2 = Hinv_dH_store[q2];
-                    double acc = 0.0;
+                    double *acc_cols = (double *)R_alloc(dim_H > 0 ? dim_H : 1, sizeof(double));
+                    int nth_acc = (dim_H >= 128) ? fhl_blas_detect_threads(dim_H) : 1;
 #ifdef _OPENMP
-#pragma omp parallel for reduction(+ : acc) schedule(static) if (dim_H >= 128)
+#pragma omp parallel for num_threads(nth_acc) schedule(static) if (nth_acc > 1)
 #endif
                     for (int c = 0; c < dim_H; c++) {
                         double cs = 0.0;
@@ -1238,8 +1239,10 @@ SEXP fhl_fit_competing_risks(SEXP X_s, SEXP group_s, SEXP n_s, SEXP time_s, SEXP
                         for (int r = 0; r < dim_H; r++) {
                             cs += p1_col[r] * P2[c + (size_t)dim_H * r];
                         }
-                        acc += cs;
+                        acc_cols[c] = cs;
                     }
+                    double acc = 0.0;
+                    for (int c = 0; c < dim_H; c++) acc += acc_cols[c];
                     tr_HdH = acc;
                 }
             } else {
@@ -1346,10 +1349,11 @@ SEXP fhl_fit_competing_risks(SEXP X_s, SEXP group_s, SEXP n_s, SEXP time_s, SEXP
             double th_m2 = inv_th * inv_th;
             double th_m3 = th_m2 * inv_th;
             double th_m4 = th_m3 * inv_th;
-            int fail_cnt = 0;
+            int *ok_flags = (int *)R_alloc(n > 0 ? n : 1, sizeof(int));
+            int nth_br = (n >= 64) ? fhl_blas_detect_threads(n) : 1;
 
 #ifdef _OPENMP
-#pragma omp parallel for reduction(+ : fail_cnt) schedule(static) if (n >= 64)
+#pragma omp parallel for num_threads(nth_br) schedule(static) if (nth_br > 1)
 #endif
             for (int j = 0; j < n; j++) {
                 int ok_j = 0;
@@ -1357,7 +1361,11 @@ SEXP fhl_fit_competing_risks(SEXP X_s, SEXP group_s, SEXP n_s, SEXP time_s, SEXP
                     -50.0, 50.0, 1e-3, 1000,
                     delta_sum_cl[j], mu_sum_cl[j], inv_th, &ok_j
                 );
-                if (!ok_j) fail_cnt++;
+                ok_flags[j] = ok_j;
+            }
+            int fail_cnt = 0;
+            for (int j = 0; j < n; j++) {
+                if (!ok_flags[j]) fail_cnt++;
             }
             if (fail_cnt > 0) {
                 Rf_error("uniroot failed in hlike.frailty (order=2): endpoint values not of opposite sign");

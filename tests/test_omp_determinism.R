@@ -36,11 +36,13 @@ run_omp_sub <- function(nth) {
     "library(survival); library(frailtyHLnew)",
     "set.seed(2024L); q <- 140L; N <- q * 5L",
     "df <- data.frame(y = rexp(N, 0.25), d = rbinom(N, 1, 0.75), x1 = rnorm(N), x2 = rnorm(N), id = factor(rep(seq_len(q), each = 5L)))",
+    "data(ren, package = 'frailtyHLnew'); ren260 <- rbind(ren, transform(ren[1:6, ], rat = max(ren$rat) + 1L))",
     "invisible(capture.output({",
     "  fg <- frailtyHL(Surv(y, d) ~ x1 + x2 + (1 | id), data = df, RandDist = 'Gamma', mord = 1, dord = 2)",
     "  fn <- frailtyHL(Surv(y, d) ~ x1 + x2 + (1 | id), data = df, RandDist = 'Normal', mord = 1, dord = 2)",
+    "  fa <- suppressWarnings(frailtyHL(Surv(time, del) ~ gp + (1 | rat), data = ren260, RandDist = 'AR1', mord = 1, dord = 1, Maxiter = 15))",
     "}))",
-    sprintf("saveRDS(list(g = c(fg$FixCoef, fg$RandCoef, fg$aic, fg$v_h), gi = fg$iter, n = c(fn$FixCoef, fn$RandCoef, fn$aic, fn$v_h), ni = fn$iter), %s)",
+    sprintf("saveRDS(list(g = c(fg$FixCoef, fg$RandCoef, fg$aic, fg$v_h), gi = fg$iter, n = c(fn$FixCoef, fn$RandCoef, fn$aic, fn$v_h), ni = fn$iter, a = c(fa$FixCoef, fa$RandCoef, fa$rho, fa$aic, fa$v_h)), %s)",
             shQuote(normalizePath(rds, winslash = "/", mustWork = FALSE)))
   ), scr)
   st <- system2(rscript, shQuote(scr), stdout = TRUE, stderr = TRUE)
@@ -53,7 +55,8 @@ stopifnot(
   identical(r1$gi, r2$gi),
   identical(r1$ni, r2$ni),
   max(abs(r1$g - r2$g)) == 0.0,
-  max(abs(r1$n - r2$n)) == 0.0
+  max(abs(r1$n - r2$n)) == 0.0,
+  max(abs(r1$a - r2$a)) == 0.0
 )
 
 cat("OPENMP BITWISE DETERMINISM TESTS PASS\n")

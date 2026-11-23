@@ -59,7 +59,9 @@ jobs:
       - name: Install dependencies
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $false
           $depsScript = Join-Path $env:RUNNER_TEMP 'frailtyhlnew_dependencies.R'
+          $depsLog = Join-Path $env:RUNNER_TEMP 'deps.log'
           $depsCode = @'
             cat('R version:', R.version.string, '\n');
             cat('Platform:', R.version[['platform']], '\n');
@@ -68,21 +70,24 @@ jobs:
             dir.create(lib, recursive = TRUE, showWarnings = FALSE);
             .libPaths(c(lib, .libPaths()));
             cat('libPaths:', paste(.libPaths(), collapse = '; '), '\n');
+            rv <- paste0(R.version$major, '.', strsplit(R.version$minor, '.', fixed = TRUE)[[1L]][1L]);
+            arm_contrib <- paste0('https://cran.r-universe.dev/bin/windows-aarch64/contrib/', rv);
             tryCatch(
-              install.packages('cmprsk', lib = lib, repos = 'https://cran.r-universe.dev'),
+              install.packages('cmprsk', lib = lib, contriburl = arm_contrib, type = 'binary'),
               error = function(e) message('binary install note: ', conditionMessage(e))
             );
             if (!requireNamespace('cmprsk', quietly = TRUE)) {
+              unlink(file.path(lib, 'cmprsk'), recursive = TRUE, force = TRUE);
               install.packages('cmprsk', lib = lib, repos = 'https://cloud.r-project.org', type = 'source');
             }
             stopifnot(requireNamespace('cmprsk', quietly = TRUE));
-          '@
+          '@ -replace "`r`n", "`n"
           [System.IO.File]::WriteAllText($depsScript, $depsCode, [System.Text.UTF8Encoding]::new($false))
-          & C:\R\bin\Rscript.exe $depsScript *> deps.log
+          & C:\R\bin\Rscript.exe $depsScript *> $depsLog
           $rc = $LASTEXITCODE
-          Get-Content deps.log
+          Get-Content $depsLog
           if ($rc -ne 0) {
-            Get-Content deps.log | Select-Object -Last 30 | ForEach-Object { Write-Host "::error::$_" }
+            Get-Content $depsLog | Select-Object -Last 30 | ForEach-Object { Write-Host "::error::$_" }
             exit $rc
           }
           $rlib = (& C:\R\bin\Rscript.exe -e "lib <- Sys.getenv('R_LIBS_USER'); if (!nzchar(lib)) lib <- file.path(Sys.getenv('RUNNER_TEMP'), 'rlib'); cat(normalizePath(lib, winslash = '/'))")
@@ -91,15 +96,18 @@ jobs:
       - name: Build & R CMD INSTALL --build (R-universe equivalent)
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $false
           & C:\R\bin\R.exe CMD build .
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $pkgTar = (Get-ChildItem "frailtyHLnew_*.tar.gz" | Select-Object -First 1).Name
-          New-Item -ItemType Directory -Path "mylib" -Force | Out-Null
-          & C:\R\bin\R.exe CMD INSTALL $pkgTar --library=mylib --build *> install.log
+          $mylib = Join-Path $env:RUNNER_TEMP 'mylib'
+          $installLog = Join-Path $env:RUNNER_TEMP 'install.log'
+          New-Item -ItemType Directory -Path $mylib -Force | Out-Null
+          & C:\R\bin\R.exe CMD INSTALL $pkgTar "--library=$mylib" --build *> $installLog
           $rc = $LASTEXITCODE
-          Get-Content install.log
+          Get-Content $installLog
           if ($rc -ne 0) {
-            Get-Content install.log | Select-Object -Last 35 | ForEach-Object { Write-Host "::error::$_" }
+            Get-Content $installLog | Select-Object -Last 35 | ForEach-Object { Write-Host "::error::$_" }
             exit $rc
           }
 
@@ -110,6 +118,7 @@ jobs:
           _R_CHECK_CRAN_INCOMING_: "FALSE"
           _R_CHECK_CRAN_INCOMING_REMOTE_: "FALSE"
         run: |
+          $PSNativeCommandUseErrorActionPreference = $false
           $pkgTar = (Get-ChildItem "frailtyHLnew_*.tar.gz" | Select-Object -First 1).Name
           & C:\R\bin\R.exe CMD check $pkgTar --no-manual
           $rc = $LASTEXITCODE

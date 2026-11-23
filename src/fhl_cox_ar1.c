@@ -331,6 +331,8 @@ static void fhl_c_ar1_step_core(
         double *dc       = (double *)R_alloc(n, sizeof(double));
         double *temp4_k  = (double *)R_alloc(m, sizeof(double));
         double *G_dw_z   = (double *)R_alloc((size_t)n * n, sizeof(double));
+        double *ad_cols  = (double *)R_alloc(n > 0 ? n : 1, sizeof(double));
+        int nth_ad = (n >= 256) ? fhl_blas_detect_threads(n) : 1;
         double neg_one = -1.0;
 
         for (int k = 0; k < p; k++) {
@@ -348,13 +350,19 @@ static void fhl_c_ar1_step_core(
             fhl_c_risk_forward(risk, dcla0b_k, dc, NULL);
             fhl_c_xz_gram1(xz, 0, risk, Wi, clam0, As, dmu0_k, dc, temp4_k, G_dw_z);
 
-            double ad1_k = 0.0;
+            /* Column-wise partial sums avoid LLVM 19 AArch64 atomic reduction bug (#150988) and preserve 0-ULP determinism. */
 #ifdef _OPENMP
-#pragma omp parallel for reduction(+ : ad1_k) schedule(static) if (n >= 256)
+#pragma omp parallel for num_threads(nth_ad) schedule(static) if (nth_ad > 1)
 #endif
-            for (size_t idx = 0; idx < (size_t)n * n; idx++) {
-                ad1_k += dinv[idx] * G_dw_z[idx];
+            for (int c = 0; c < n; c++) {
+                const double *d_col = dinv + (size_t)c * n;
+                const double *g_col = G_dw_z + (size_t)c * n;
+                double cs = 0.0;
+                for (int r = 0; r < n; r++) cs += d_col[r] * g_col[r];
+                ad_cols[c] = cs;
             }
+            double ad1_k = 0.0;
+            for (int c = 0; c < n; c++) ad1_k += ad_cols[c];
             dft1[k] -= 0.5 * ad1_k;
         }
     }
@@ -444,13 +452,20 @@ static void fhl_c_ar1_step_core(
         fhl_c_xz_gram1(xz, 1, risk, Wi, clam0, As, dWi1, dBi1, dAs1, Hd1);
         fhl_c_ar1_add_scaled_prec(Hd1, r_tot, p, n, -ial2, prec);
 
-        double tr_Hinv_Hd1 = 0.0;
+        double *tr_cols = (double *)R_alloc(r_tot > 0 ? r_tot : 1, sizeof(double));
+        int nth_tr = (r_tot >= 128) ? fhl_blas_detect_threads(r_tot) : 1;
 #ifdef _OPENMP
-#pragma omp parallel for reduction(+ : tr_Hinv_Hd1) schedule(static) if (r_tot >= 128)
+#pragma omp parallel for num_threads(nth_tr) schedule(static) if (nth_tr > 1)
 #endif
-        for (size_t idx = 0; idx < (size_t)r_tot * r_tot; idx++) {
-            tr_Hinv_Hd1 += Hinv[idx] * Hd1[idx];
+        for (int c = 0; c < r_tot; c++) {
+            const double *h_col = Hinv + (size_t)c * r_tot;
+            const double *d_col = Hd1 + (size_t)c * r_tot;
+            double cs = 0.0;
+            for (int r = 0; r < r_tot; r++) cs += h_col[r] * d_col[r];
+            tr_cols[c] = cs;
         }
+        double tr_Hinv_Hd1 = 0.0;
+        for (int c = 0; c < r_tot; c++) tr_Hinv_Hd1 += tr_cols[c];
         double gamma1 = -alpha_h * tr_Hinv_Hd1;
 
         double gamma21 = 0.0;
@@ -670,12 +685,19 @@ static SEXP fhl_c_ar1_se_core(
             hpn2 = hliken - 0.5 * logdet_H22;
         }
 
+        double *df_cols = (double *)R_alloc(r_tot > 0 ? r_tot : 1, sizeof(double));
+        int nth_df = (r_tot >= 128) ? fhl_blas_detect_threads(r_tot) : 1;
 #ifdef _OPENMP
-#pragma omp parallel for reduction(+ : df1) schedule(static) if (r_tot >= 128)
+#pragma omp parallel for num_threads(nth_df) schedule(static) if (nth_df > 1)
 #endif
-        for (size_t idx = 0; idx < (size_t)r_tot * r_tot; idx++) {
-            df1 += Hinv[idx] * H0[idx];
+        for (int c = 0; c < r_tot; c++) {
+            const double *hi_col = Hinv + (size_t)c * r_tot;
+            const double *h0_col = H0 + (size_t)c * r_tot;
+            double cs = 0.0;
+            for (int r = 0; r < r_tot; r++) cs += hi_col[r] * h0_col[r];
+            df_cols[c] = cs;
         }
+        for (int c = 0; c < r_tot; c++) df1 += df_cols[c];
     }
     double hpn3 = hpn1 + second;
 
