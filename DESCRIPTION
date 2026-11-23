@@ -1,0 +1,12 @@
+Package: frailtyHLnew
+Type: Package
+Title: Frailty Models via Hierarchical Likelihood
+Version: 2.4.0
+Date: 2026-11-23
+Author: Il Do Ha, Maengseok Noh, Jiwoong Kim, Youngjo Lee
+Maintainer: Maengseok Noh <msnoh@pknu.ac.kr>
+Description: Implements hierarchical-likelihood estimation procedures for survival frailty models, including Cox proportional-hazards frailty models (Gamma, log-normal, and AR(1)), cause-specific and subhazard competing-risk frailty models, multilevel accelerated failure time (AFT) models, joint longitudinal-survival models, and penalized variable selection.
+Depends: R (>= 3.5.0), methods, Matrix, survival, cmprsk
+License: GPL (>= 2)
+NeedsCompilation: yes
+SystemRequirements: C compiler with OpenMP support, BLAS, LAPACK

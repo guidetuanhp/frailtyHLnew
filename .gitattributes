@@ -1,0 +1,17 @@
+# Preserve LF line endings across Windows/Linux/macOS for R CMD build & R CMD check
+* text=auto eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.R text eol=lf
+*.Rd text eol=lf
+*.md text eol=lf
+Makevars text eol=lf
+Makevars.win text eol=lf
+DESCRIPTION text eol=lf
+NAMESPACE text eol=lf
+NEWS text eol=lf
+.Rbuildignore text eol=lf
+.clang-format text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+*.rda binary

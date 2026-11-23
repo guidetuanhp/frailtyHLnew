@@ -1,0 +1,3 @@
+# Portable compilation flags. Optional architecture flags may be passed via FHL_ARCH_FLAGS.
+PKG_CFLAGS = $(SHLIB_OPENMP_CFLAGS) $(FHL_ARCH_FLAGS)
+PKG_LIBS = $(SHLIB_OPENMP_CFLAGS) $(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS)

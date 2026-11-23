@@ -1,0 +1,13 @@
+importFrom("stats", "as.formula", "is.empty.model", "model.extract",
+           "model.frame", "model.matrix", "model.offset", "model.response",
+           "model.weights", "pchisq", "pnorm", "qnorm", "terms")
+importFrom("methods", "as", "is", "validObject")
+importFrom("Matrix", "drop0", "t")
+importFrom("survival", "coxph")
+importFrom("cmprsk", "crr")
+export("frailtyHL", "jointmodeling", "hlike.frailty", "jmfit",
+       "frailty.vs", "mlmfit", "CmpRsk", "summary.frailtyHL")
+S3method(summary, frailtyHL)
+S3method(print, hlike)
+S3method(summary, hlike)
+useDynLib(frailtyHLnew, .registration=TRUE)

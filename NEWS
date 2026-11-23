@@ -1,0 +1,27 @@
+Version 2.4.0 (2026-11-23)
+- Native C and OpenMP estimation engine across all six hierarchical-likelihood
+  survival model families:
+  * Cox proportional-hazards frailty models (`frailtyHL`) with Gamma, Normal
+    (log-normal), and AR(1) random effects, supporting single and multiple
+    random-effect components, right-censored data, and left-truncated counting
+    processes (`Surv(entry, exit, status)`).
+  * Competing-risks frailty models (`CmpRsk`, `hlike.frailty`) for cause-specific
+    hazards and Fine-Gray IPCW subdistribution hazards under univariate,
+    independent, exchangeable, and unstructured frailty covariances, including
+    second-order Laplace approximation (`order = 2`) for univariate frailty.
+  * Multilevel log-normal accelerated failure time (AFT) mixed models (`mlmfit`)
+    for one and two random-effect components under both `HL(0,1)` (`mord = 0`)
+    and first-order Laplace `HL(1,1)` (`mord = 1`) approximations.
+  * Joint longitudinal and time-to-event models (`jointmodeling`, `jmfit`) for
+    Gaussian-Cox, Gaussian-bivariate Cox, and bivariate frailty formulations.
+  * Penalized variable selection (`frailty.vs`) with LASSO, SCAD, and HL
+    penalties for uncorrelated and correlated random-effect Cox frailty models
+    using native grid evaluation and BIC/GCV tuning selection.
+- Numerical linear algebra and OpenMP runtime:
+  * Compressed O(n + m) survival risk-set sweeps and sparse CSR/CSC `[X, Z]`
+    Gram and direct-trace operators with deterministic strip-parallel OpenMP
+    and runtime-dispatched AVX2+FMA / generic blocked Cholesky kernels.
+  * Strict positive-definite Cholesky verification on symmetric h-likelihood
+    Hessians and Schur complements, cancellation-free small-variance expansions
+    for Gamma and AR(1) Laplace objectives, and 60-stage continued-fraction
+    Mills-ratio evaluation in right-censored AFT models.

@@ -1,0 +1,25 @@
+# Compiled C / R package build artifacts
+*.o
+*.so
+*.dll
+*.def
+*.a
+*.lib
+*.exp
+*.exe
+*.tar.gz
+*.Rcheck/
+src/*.o
+src/*.so
+src/*.dll
+library/
+check/
+
+# R session / editor files
+.Rhistory
+.RData
+.Rproj.user/
+.Ruserdata
+*.tmp
+.DS_Store
+Thumbs.db
