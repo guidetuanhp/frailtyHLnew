@@ -505,6 +505,7 @@ static int fhl_c_lognormal_se_core(
     int varfixed, int varnonneg,
     double *se_lam_out, double *scalars_out /* [hliken, hpn1, hpn2, hpn3, hlike1, df1] */
 ) {
+    (void)Hinv;
     (void)clam0;
     const double pi_const = 3.1415926535900001;
     const int m = risk->m;

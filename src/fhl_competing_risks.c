@@ -1,15 +1,6 @@
 #include "fhl_linalg.h"
-#include "fhl_core.h"
 #include "fhl_native_api.h"
-#include <Rmath.h>
-#include <string.h>
-#include <stdlib.h>
-#include <math.h>
 #include <float.h>
-
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #undef exp
 #undef log
@@ -521,6 +512,7 @@ static double fhl_hlike_logdet(const double *M, int dim) {
 /* Construct dSigma(q) (m_s x m_s) for q = 0 .. s-1 (0-based):
    cov_type: 0 = "none", 1 = "independent", 2 = "exchangeable", 3 = "unstructured" */
 static void fhl_hlike_dSigma(int cov_type, int m_s, int s, int q, double *dSig) {
+    (void)s;
     memset(dSig, 0, (size_t)m_s * m_s * sizeof(double));
     if (cov_type == 0) {
         dSig[0] = 1.0;
@@ -694,20 +686,20 @@ SEXP fhl_fit_competing_risks(SEXP X_s, SEXP group_s, SEXP n_s, SEXP time_s, SEXP
                              SEXP y_list, SEXP d_list, SEXP beta_init_s, SEXP theta_init_s,
                              SEXP v_init_s, SEXP order_s, SEXP cov_type_s, SEXP subhazard_s,
                              SEXP max_iter_s, SEXP tol_s) {
-    if (!isMatrix(X_s) || !isReal(X_s)) Rf_error("X must be a numeric matrix in fhl_fit_competing_risks");
-    if (!isInteger(group_s)) Rf_error("group must be an integer vector in fhl_fit_competing_risks");
-    if (!isReal(time_s) || !isInteger(index_s)) Rf_error("Invalid time/index types in fhl_fit_competing_risks");
+    if (!Rf_isMatrix(X_s) || !Rf_isReal(X_s)) Rf_error("X must be a numeric matrix in fhl_fit_competing_risks");
+    if (!Rf_isInteger(group_s)) Rf_error("group must be an integer vector in fhl_fit_competing_risks");
+    if (!Rf_isReal(time_s) || !Rf_isInteger(index_s)) Rf_error("Invalid time/index types in fhl_fit_competing_risks");
     if (TYPEOF(y_list) != VECSXP || TYPEOF(d_list) != VECSXP) Rf_error("y_list and d_list must be lists");
 
-    int N = nrows(X_s);
-    int p = ncols(X_s);
-    int n = asInteger(n_s);
+    int N = Rf_nrows(X_s);
+    int p = Rf_ncols(X_s);
+    int n = Rf_asInteger(n_s);
     int m = LENGTH(y_list);
-    int order = asInteger(order_s);
-    int cov_type = asInteger(cov_type_s);
-    int subhazard = asInteger(subhazard_s) ? 1 : 0;
-    int max_iter = asInteger(max_iter_s);
-    double tol = asReal(tol_s);
+    int order = Rf_asInteger(order_s);
+    int cov_type = Rf_asInteger(cov_type_s);
+    int subhazard = Rf_asInteger(subhazard_s) ? 1 : 0;
+    int max_iter = Rf_asInteger(max_iter_s);
+    double tol = Rf_asReal(tol_s);
 
     if (N <= 0 || n <= 0 || m <= 0 || max_iter <= 0) {
         Rf_error("Invalid dimensions in fhl_fit_competing_risks");
@@ -735,9 +727,9 @@ SEXP fhl_fit_competing_risks(SEXP X_s, SEXP group_s, SEXP n_s, SEXP time_s, SEXP
     int dim_H = mp + dim_Z;
     int r_g = p + n;
 
-    if (nrows(beta_init_s) != p || ncols(beta_init_s) != m ||
-        nrows(theta_init_s) != m_s || ncols(theta_init_s) != m_s ||
-        nrows(v_init_s) != n || ncols(v_init_s) != m_s) {
+    if (Rf_nrows(beta_init_s) != p || Rf_ncols(beta_init_s) != m ||
+        Rf_nrows(theta_init_s) != m_s || Rf_ncols(theta_init_s) != m_s ||
+        Rf_nrows(v_init_s) != n || Rf_ncols(v_init_s) != m_s) {
         Rf_error("Initial value matrix dimensions do not match in fhl_fit_competing_risks");
     }
 
@@ -1422,7 +1414,7 @@ SEXP fhl_fit_competing_risks(SEXP X_s, SEXP group_s, SEXP n_s, SEXP time_s, SEXP
     }
 
     /* 8. Post-processing in C: synchronize H / H_inv / SigmaInv at final converged state */
-    SEXP H0_s = PROTECT(allocMatrix(REALSXP, dim_H, dim_H));
+    SEXP H0_s = PROTECT(Rf_allocMatrix(REALSXP, dim_H, dim_H));
     double *H0_p = REAL(H0_s);
     memcpy(H0_p, H, (size_t)dim_H * dim_H * sizeof(double));
     fhl_hlike_add_kron_I_scaled(H0_p, dim_H, mp, SigmaInv, m_s, n, -1.0);
@@ -1445,7 +1437,7 @@ SEXP fhl_fit_competing_risks(SEXP X_s, SEXP group_s, SEXP n_s, SEXP time_s, SEXP
         }
     }
 
-    SEXP H_s = PROTECT(allocMatrix(REALSXP, dim_H, dim_H));
+    SEXP H_s = PROTECT(Rf_allocMatrix(REALSXP, dim_H, dim_H));
     memcpy(REAL(H_s), H, (size_t)dim_H * dim_H * sizeof(double));
 
     double h1 = 0.0;
@@ -1478,46 +1470,46 @@ SEXP fhl_fit_competing_risks(SEXP X_s, SEXP group_s, SEXP n_s, SEXP time_s, SEXP
 
     /* Return list(beta_i, theta_i, v_i, H, H0, beta_SE, lambda_0,
                    h1, hp, Ahp, rAIC, cAIC, converge, iterations) */
-    SEXP out = PROTECT(allocVector(VECSXP, 14));
+    SEXP out = PROTECT(Rf_allocVector(VECSXP, 14));
 
-    SEXP beta_i_s = PROTECT(allocMatrix(REALSXP, p, m));
+    SEXP beta_i_s = PROTECT(Rf_allocMatrix(REALSXP, p, m));
     memcpy(REAL(beta_i_s), beta_curr, (size_t)mp * sizeof(double));
     SET_VECTOR_ELT(out, 0, beta_i_s);
 
-    SEXP theta_i_s = PROTECT(allocMatrix(REALSXP, m_s, m_s));
+    SEXP theta_i_s = PROTECT(Rf_allocMatrix(REALSXP, m_s, m_s));
     memcpy(REAL(theta_i_s), theta_curr, (size_t)m_s * m_s * sizeof(double));
     SET_VECTOR_ELT(out, 1, theta_i_s);
 
-    SEXP v_i_s = PROTECT(allocMatrix(REALSXP, n, m_s));
+    SEXP v_i_s = PROTECT(Rf_allocMatrix(REALSXP, n, m_s));
     memcpy(REAL(v_i_s), v_curr, (size_t)dim_Z * sizeof(double));
     SET_VECTOR_ELT(out, 2, v_i_s);
 
     SET_VECTOR_ELT(out, 3, H_s);
     SET_VECTOR_ELT(out, 4, H0_s);
 
-    SEXP beta_se_s = PROTECT(allocVector(REALSXP, mp));
+    SEXP beta_se_s = PROTECT(Rf_allocVector(REALSXP, mp));
     double *se_p = REAL(beta_se_s);
     for (int j = 0; j < mp; j++) {
         se_p[j] = sqrt(H_inv[j + (size_t)dim_H * j]);
     }
     SET_VECTOR_ELT(out, 5, beta_se_s);
 
-    SEXP lam0_list_s = PROTECT(allocVector(VECSXP, m));
+    SEXP lam0_list_s = PROTECT(Rf_allocVector(VECSXP, m));
     for (int k = 0; k < m; k++) {
-        SEXP lk = PROTECT(allocVector(REALSXP, num_ys[k]));
+        SEXP lk = PROTECT(Rf_allocVector(REALSXP, num_ys[k]));
         memcpy(REAL(lk), lambda_0[k], (size_t)num_ys[k] * sizeof(double));
         SET_VECTOR_ELT(lam0_list_s, k, lk);
         UNPROTECT(1);
     }
     SET_VECTOR_ELT(out, 6, lam0_list_s);
 
-    SET_VECTOR_ELT(out, 7, ScalarReal(h1));
-    SET_VECTOR_ELT(out, 8, ScalarReal(hp));
-    SET_VECTOR_ELT(out, 9, ScalarReal(Ahp));
-    SET_VECTOR_ELT(out, 10, ScalarReal(rAIC));
-    SET_VECTOR_ELT(out, 11, ScalarReal(cAIC));
-    SET_VECTOR_ELT(out, 12, ScalarInteger(converge));
-    SET_VECTOR_ELT(out, 13, ScalarInteger(final_iter));
+    SET_VECTOR_ELT(out, 7, Rf_ScalarReal(h1));
+    SET_VECTOR_ELT(out, 8, Rf_ScalarReal(hp));
+    SET_VECTOR_ELT(out, 9, Rf_ScalarReal(Ahp));
+    SET_VECTOR_ELT(out, 10, Rf_ScalarReal(rAIC));
+    SET_VECTOR_ELT(out, 11, Rf_ScalarReal(cAIC));
+    SET_VECTOR_ELT(out, 12, Rf_ScalarInteger(converge));
+    SET_VECTOR_ELT(out, 13, Rf_ScalarInteger(final_iter));
 
     UNPROTECT(8);
     return out;

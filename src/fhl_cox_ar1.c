@@ -19,13 +19,6 @@
 
 #include "fhl_linalg.h"
 #include "fhl_native_api.h"
-#include <Rmath.h>
-#include <string.h>
-#include <math.h>
-
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #undef exp
 #undef log
@@ -686,19 +679,19 @@ static SEXP fhl_c_ar1_se_core(
     }
     double hpn3 = hpn1 + second;
 
-    SEXP out = PROTECT(allocVector(VECSXP, 7));
-    SET_VECTOR_ELT(out, 0, ScalarReal(0.0));
-    SEXP s_hliken = PROTECT(allocMatrix(REALSXP, 1, 1)); REAL(s_hliken)[0] = hliken;
-    SEXP s_hpn1 = PROTECT(allocMatrix(REALSXP, 1, 1));   REAL(s_hpn1)[0] = hpn1;
-    SEXP s_hpn2 = PROTECT(allocMatrix(REALSXP, 1, 1));   REAL(s_hpn2)[0] = hpn2;
-    SEXP s_hpn3 = PROTECT(allocMatrix(REALSXP, 1, 1));   REAL(s_hpn3)[0] = hpn3;
-    SEXP s_hlike1 = PROTECT(allocMatrix(REALSXP, 1, 1)); REAL(s_hlike1)[0] = hlike1;
+    SEXP out = PROTECT(Rf_allocVector(VECSXP, 7));
+    SET_VECTOR_ELT(out, 0, Rf_ScalarReal(0.0));
+    SEXP s_hliken = PROTECT(Rf_allocMatrix(REALSXP, 1, 1)); REAL(s_hliken)[0] = hliken;
+    SEXP s_hpn1 = PROTECT(Rf_allocMatrix(REALSXP, 1, 1));   REAL(s_hpn1)[0] = hpn1;
+    SEXP s_hpn2 = PROTECT(Rf_allocMatrix(REALSXP, 1, 1));   REAL(s_hpn2)[0] = hpn2;
+    SEXP s_hpn3 = PROTECT(Rf_allocMatrix(REALSXP, 1, 1));   REAL(s_hpn3)[0] = hpn3;
+    SEXP s_hlike1 = PROTECT(Rf_allocMatrix(REALSXP, 1, 1)); REAL(s_hlike1)[0] = hlike1;
     SET_VECTOR_ELT(out, 1, s_hliken);
     SET_VECTOR_ELT(out, 2, s_hpn1);
     SET_VECTOR_ELT(out, 3, s_hpn2);
     SET_VECTOR_ELT(out, 4, s_hpn3);
     SET_VECTOR_ELT(out, 5, s_hlike1);
-    SET_VECTOR_ELT(out, 6, ScalarReal(df1));
+    SET_VECTOR_ELT(out, 6, Rf_ScalarReal(df1));
 
     UNPROTECT(6);
     return out;
@@ -718,12 +711,12 @@ SEXP fhl_fit_cox_ar1(
         TYPEOF(alpha_init_s) != REALSXP) {
         Rf_error("Invalid arguments passed to fhl_fit_cox_ar1");
     }
-    int n = nrows(x_s), p = ncols(x_s);
+    int n = Rf_nrows(x_s), p = Rf_ncols(x_s);
     int r_tot = p + n;
-    int mord = asInteger(mord_s), dord = asInteger(dord_s);
-    int varfixed = asLogical(varfixed_s), varnonneg = asLogical(varnonneg_s);
-    int max_iter = asInteger(max_iter_s);
-    double tol = asReal(convergence_s);
+    int mord = Rf_asInteger(mord_s), dord = Rf_asInteger(dord_s);
+    int varfixed = Rf_asLogical(varfixed_s), varnonneg = Rf_asLogical(varnonneg_s);
+    int max_iter = Rf_asInteger(max_iter_s);
+    double tol = Rf_asReal(convergence_s);
 
     fhl_c_ar1_prec_t prec;
     fhl_c_ar1_init_topology(&prec, z_list_s, n);
@@ -741,18 +734,18 @@ SEXP fhl_fit_cox_ar1(
     double alpha_curr = REAL(alpha_init_s)[0];
     double rho = 0.5;
 
-    SEXP beta_h0_s = PROTECT(allocMatrix(REALSXP, p, 1));
-    SEXP v_h0_s = PROTECT(allocMatrix(REALSXP, n, 1));
-    SEXP beta_h_s = PROTECT(allocMatrix(REALSXP, p, 1));
-    SEXP v_h_s = PROTECT(allocMatrix(REALSXP, n, 1));
-    SEXP alpha_h0_out_s = PROTECT(allocVector(REALSXP, 1));
-    SEXP alpha_h_out_s = PROTECT(allocVector(REALSXP, 1));
-    SEXP dft_s = PROTECT(allocMatrix(REALSXP, r_tot, 1));
-    SEXP Hinv_s = PROTECT(allocMatrix(REALSXP, r_tot, r_tot));
-    SEXP clam0_s = PROTECT(allocMatrix(REALSXP, n, 1));
-    SEXP H_s = PROTECT(allocMatrix(REALSXP, r_tot, r_tot));
-    SEXP se_beta_s = PROTECT(allocMatrix(REALSXP, p, 1));
-    SEXP H0_s = PROTECT(allocMatrix(REALSXP, r_tot, r_tot));
+    SEXP beta_h0_s = PROTECT(Rf_allocMatrix(REALSXP, p, 1));
+    SEXP v_h0_s = PROTECT(Rf_allocMatrix(REALSXP, n, 1));
+    SEXP beta_h_s = PROTECT(Rf_allocMatrix(REALSXP, p, 1));
+    SEXP v_h_s = PROTECT(Rf_allocMatrix(REALSXP, n, 1));
+    SEXP alpha_h0_out_s = PROTECT(Rf_allocVector(REALSXP, 1));
+    SEXP alpha_h_out_s = PROTECT(Rf_allocVector(REALSXP, 1));
+    SEXP dft_s = PROTECT(Rf_allocMatrix(REALSXP, r_tot, 1));
+    SEXP Hinv_s = PROTECT(Rf_allocMatrix(REALSXP, r_tot, r_tot));
+    SEXP clam0_s = PROTECT(Rf_allocMatrix(REALSXP, n, 1));
+    SEXP H_s = PROTECT(Rf_allocMatrix(REALSXP, r_tot, r_tot));
+    SEXP se_beta_s = PROTECT(Rf_allocMatrix(REALSXP, p, 1));
+    SEXP H0_s = PROTECT(Rf_allocMatrix(REALSXP, r_tot, r_tot));
 
     double err = 1.0;
     int print_i = 1;
@@ -805,7 +798,7 @@ SEXP fhl_fit_cox_ar1(
     }
     fhl_c_ar1_prec_update_rho(&prec, rho_h_last);
 
-    SEXP res2 = PROTECT(allocVector(VECSXP, 25));
+    SEXP res2 = PROTECT(Rf_allocVector(VECSXP, 25));
     SET_VECTOR_ELT(res2, 0, x_s);
     SET_VECTOR_ELT(res2, 1, R_NilValue);
     SET_VECTOR_ELT(res2, 2, y_s);
@@ -828,9 +821,9 @@ SEXP fhl_fit_cox_ar1(
     SET_VECTOR_ELT(res2, 19, se_beta_s);
     SET_VECTOR_ELT(res2, 20, R_NilValue);
     SET_VECTOR_ELT(res2, 21, H0_s);
-    SET_VECTOR_ELT(res2, 22, ScalarReal(rho_0_last));
-    SET_VECTOR_ELT(res2, 23, ScalarReal(rho_h_last));
-    SET_VECTOR_ELT(res2, 24, ScalarReal(se_rho_last));
+    SET_VECTOR_ELT(res2, 22, Rf_ScalarReal(rho_0_last));
+    SET_VECTOR_ELT(res2, 23, Rf_ScalarReal(rho_h_last));
+    SET_VECTOR_ELT(res2, 24, Rf_ScalarReal(se_rho_last));
 
     SEXP res3 = PROTECT(fhl_c_ar1_se_core(
         n, p,
@@ -841,11 +834,11 @@ SEXP fhl_fit_cox_ar1(
         &prec
     ));
 
-    SEXP out = PROTECT(allocVector(VECSXP, 5));
+    SEXP out = PROTECT(Rf_allocVector(VECSXP, 5));
     SET_VECTOR_ELT(out, 0, res2);
     SET_VECTOR_ELT(out, 1, res3);
-    SET_VECTOR_ELT(out, 2, ScalarInteger(print_i));
-    SET_VECTOR_ELT(out, 3, ScalarReal(print_err));
+    SET_VECTOR_ELT(out, 2, Rf_ScalarInteger(print_i));
+    SET_VECTOR_ELT(out, 3, Rf_ScalarReal(print_err));
     SET_VECTOR_ELT(out, 4, R_NilValue);
 
     UNPROTECT(15);

@@ -1,0 +1,134 @@
+name: R-CMD-check
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-arm64:
+    name: Windows ARM64 (R-${{ matrix.r }})
+    runs-on: windows-11-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        r: [release, devel]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Rtools45 ARM64
+        id: cache-rtools
+        uses: actions/cache@v4
+        with:
+          path: C:\rtools45-aarch64
+          key: rtools45-aarch64-6768-6492
+
+      - name: Install Rtools45 ARM64
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "C:\rtools45-aarch64")) {
+            curl.exe -sSL -o rtools45.exe "https://github.com/r-windows/rtools-chocolatey/releases/download/6768/rtools45-aarch64-6768-6492.exe"
+            Start-Process "rtools45.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES" -Wait
+            Remove-Item rtools45.exe -Force
+          }
+          "RTOOLS45_AARCH64_HOME=C:\rtools45-aarch64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "R_PLATFORM_PKGTYPE=windows.binary.clang-aarch64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install R (${{ matrix.r }}) for Windows ARM64
+        shell: pwsh
+        run: |
+          if ("${{ matrix.r }}" -eq "devel") {
+            $url = "https://github.com/r-devel/windows-arm64/releases/download/devel/R-devel-aarch64.exe"
+          } else {
+            $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/r-devel/windows-arm64/releases" -Headers @{"User-Agent"="gha"} |
+              Where-Object { $_.tag_name -match '^[0-9]+\.[0-9]+\.[0-9]+$' } |
+              Select-Object -First 1
+            $asset = $rel.assets | Where-Object { $_.name -like "*-aarch64.exe" } | Select-Object -First 1
+            $url = $asset.browser_download_url
+          }
+          Write-Host "Downloading R from $url"
+          curl.exe -sSL --retry 3 -o Rinstall.exe $url
+          Start-Process "Rinstall.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /DIR=C:\R" -Wait
+          Remove-Item Rinstall.exe -Force
+          "C:\R\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          R --version
+          R CMD config CC
+          R CMD config SHLIB_OPENMP_CFLAGS
+          Rscript -e "tryCatch(install.packages('cmprsk', repos = 'https://cran.r-universe.dev'), error = function(e) message(conditionMessage(e))); if (!requireNamespace('cmprsk', quietly = TRUE)) install.packages('cmprsk', repos = 'https://cloud.r-project.org', type = 'source'); stopifnot(requireNamespace('cmprsk', quietly = TRUE))"
+
+      - name: Build & R CMD INSTALL --build (R-universe equivalent)
+        shell: bash
+        run: |
+          set -euo pipefail
+          R CMD build .
+          PKG_TAR=$(ls -1 frailtyHLnew_*.tar.gz | head -n 1)
+          mkdir -p mylib
+          R CMD INSTALL "$PKG_TAR" --library=mylib --build 2>&1 | tee install.log
+
+      - name: R CMD check
+        shell: bash
+        env:
+          _R_CHECK_FORCE_SUGGESTS_: "FALSE"
+          _R_CHECK_CRAN_INCOMING_: "FALSE"
+        run: |
+          PKG_TAR=$(ls -1 frailtyHLnew_*.tar.gz | head -n 1)
+          if ! R CMD check "$PKG_TAR" --no-manual; then
+            echo "=== 00install.out ==="
+            cat frailtyHLnew.Rcheck/00install.out || true
+            echo "=== 00check.log ==="
+            cat frailtyHLnew.Rcheck/00check.log || true
+            for f in frailtyHLnew.Rcheck/tests/*.Rout.fail; do
+              [ -f "$f" ] && echo "=== $f ===" && cat "$f"
+            done
+            exit 1
+          fi
+
+  linux-clang-openmp:
+    name: Linux Clang + OpenMP (--as-cran)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install R, Clang & libomp
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends r-base r-base-dev clang libomp-dev gfortran qpdf tidy
+
+      - name: Configure Clang + OpenMP Makevars
+        run: |
+          mkdir -p ~/.R
+          cat << 'EOF' > ~/.R/Makevars
+          CC = clang
+          CFLAGS = -O2 -Wall -Wextra
+          SHLIB_OPENMP_CFLAGS = -fopenmp
+          EOF
+          clang --version
+
+      - name: Install dependencies
+        run: |
+          sudo Rscript -e "install.packages('cmprsk', repos = 'https://cloud.r-project.org')"
+
+      - name: Build & R CMD check --as-cran
+        env:
+          _R_CHECK_FORCE_SUGGESTS_: "FALSE"
+          _R_CHECK_CRAN_INCOMING_REMOTE_: "FALSE"
+        run: |
+          R CMD build .
+          PKG_TAR=$(ls -1 frailtyHLnew_*.tar.gz | head -n 1)
+          if ! R CMD check "$PKG_TAR" --as-cran --no-manual; then
+            cat frailtyHLnew.Rcheck/00install.out || true
+            cat frailtyHLnew.Rcheck/00check.log || true
+            for f in frailtyHLnew.Rcheck/tests/*.Rout.fail; do
+              [ -f "$f" ] && echo "=== $f ===" && cat "$f"
+            done
+            exit 1
+          fi

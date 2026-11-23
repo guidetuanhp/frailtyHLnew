@@ -75,8 +75,8 @@ static void fhl_gamma_small_alpha_k2_k21(
         if (k21_rem_out) *k21_rem_out = k21_rem;
         if (k21_out) *k21_out = k21;
     } else {
-        double dp = digamma(ial);
-        double ddp = trigamma(ial);
+        double dp = Rf_digamma(ial);
+        double ddp = Rf_trigamma(ial);
         double sum_vv_minus_uu = 0.0;
         for (int r = 0; r < q_i; ++r) {
             sum_vv_minus_uu += (v_seg[r] - exp(v_seg[r]));
@@ -107,7 +107,7 @@ static double fhl_gamma_se_hlike2_comp(
         }
     } else {
         double i_alp1 = 1.0 / a1;
-        double c_alp1 = -lgammafn(i_alp1) - (i_alp1 * log(a1));
+        double c_alp1 = -Rf_lgammafn(i_alp1) - (i_alp1 * log(a1));
         for (int r = s1; r < s2; ++r) {
             acc += ((v_h1[r] - u_h1[r]) / a1) + c_alp1;
         }
@@ -132,7 +132,7 @@ static double fhl_gamma_se_hlike2_cancel_comp(
         }
     } else {
         double i_alp1 = 1.0 / a1;
-        double c_alp1 = -lgammafn(i_alp1) - (i_alp1 * log(a1)) + 0.5 * log(2.0 * pi_const * a1);
+        double c_alp1 = -Rf_lgammafn(i_alp1) - (i_alp1 * log(a1)) + 0.5 * log(2.0 * pi_const * a1);
         for (int r = s1; r < s2; ++r) {
             acc += ((v_h1[r] - u_h1[r]) / a1) - 0.5 * v_h1[r] + c_alp1;
         }

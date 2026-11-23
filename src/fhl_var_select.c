@@ -1,16 +1,8 @@
 #include "fhl_linalg.h"
 #include "fhl_native_api.h"
-#include <Rmath.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <math.h>
 #include <float.h>
-
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #undef exp
 #undef log
@@ -934,34 +926,34 @@ static SEXP fhl_vs_build_result_list(int p, int q, int n_alpha_out, int alpha_is
                                      const double *best_B, const double *best_se,
                                      const double *best_v, const double *best_alpha,
                                      double best_bic, int best_rep, int best_conv) {
-    SEXP beta_out_s = PROTECT(allocVector(REALSXP, p));
-    SEXP se_out_s = PROTECT(allocVector(REALSXP, p));
+    SEXP beta_out_s = PROTECT(Rf_allocVector(REALSXP, p));
+    SEXP se_out_s = PROTECT(Rf_allocVector(REALSXP, p));
     for (int j = 0; j < p; j++) {
         REAL(beta_out_s)[j] = Rf_fround(best_B[j], 5.0);
         REAL(se_out_s)[j] = Rf_fround(best_se[j], 5.0);
     }
 
-    SEXP v_out_s = PROTECT(allocVector(REALSXP, q));
+    SEXP v_out_s = PROTECT(Rf_allocVector(REALSXP, q));
     for (int j = 0; j < q; j++) REAL(v_out_s)[j] = Rf_fround(best_v[j], 5.0);
 
-    SEXP alpha_out_s = alpha_is_matrix ? PROTECT(allocMatrix(REALSXP, n_alpha_out, 1))
-                                       : PROTECT(allocVector(REALSXP, n_alpha_out));
+    SEXP alpha_out_s = alpha_is_matrix ? PROTECT(Rf_allocMatrix(REALSXP, n_alpha_out, 1))
+                                       : PROTECT(Rf_allocVector(REALSXP, n_alpha_out));
     for (int i = 0; i < n_alpha_out; i++) REAL(alpha_out_s)[i] = Rf_fround(best_alpha[i], 5.0);
 
     SEXP tun_out_s;
     if (pen_type == 2) {
-        tun_out_s = PROTECT(allocVector(REALSXP, 2));
+        tun_out_s = PROTECT(Rf_allocVector(REALSXP, 2));
         REAL(tun_out_s)[0] = sel_tun1;
         REAL(tun_out_s)[1] = sel_tun2;
     } else {
-        tun_out_s = PROTECT(ScalarReal(sel_tun1));
+        tun_out_s = PROTECT(Rf_ScalarReal(sel_tun1));
     }
 
-    SEXP bic_out_s = PROTECT(ScalarReal(Rf_fround(best_bic, 5.0)));
-    SEXP rep_out_s = PROTECT(ScalarInteger(best_rep));
-    SEXP conv_out_s = PROTECT(ScalarInteger(best_conv));
+    SEXP bic_out_s = PROTECT(Rf_ScalarReal(Rf_fround(best_bic, 5.0)));
+    SEXP rep_out_s = PROTECT(Rf_ScalarInteger(best_rep));
+    SEXP conv_out_s = PROTECT(Rf_ScalarInteger(best_conv));
 
-    SEXP out = PROTECT(allocVector(VECSXP, 8));
+    SEXP out = PROTECT(Rf_allocVector(VECSXP, 8));
     SET_VECTOR_ELT(out, 0, beta_out_s);
     SET_VECTOR_ELT(out, 1, se_out_s);
     SET_VECTOR_ELT(out, 2, v_out_s);
@@ -971,16 +963,16 @@ static SEXP fhl_vs_build_result_list(int p, int q, int n_alpha_out, int alpha_is
     SET_VECTOR_ELT(out, 6, rep_out_s);
     SET_VECTOR_ELT(out, 7, conv_out_s);
 
-    SEXP nms = PROTECT(allocVector(STRSXP, 8));
-    SET_STRING_ELT(nms, 0, mkChar("beta"));
-    SET_STRING_ELT(nms, 1, mkChar("se"));
-    SET_STRING_ELT(nms, 2, mkChar("v"));
-    SET_STRING_ELT(nms, 3, mkChar("alpha"));
-    SET_STRING_ELT(nms, 4, mkChar("tuning_parameter"));
-    SET_STRING_ELT(nms, 5, mkChar("BIC"));
-    SET_STRING_ELT(nms, 6, mkChar("repetition"));
-    SET_STRING_ELT(nms, 7, mkChar("convergence"));
-    setAttrib(out, R_NamesSymbol, nms);
+    SEXP nms = PROTECT(Rf_allocVector(STRSXP, 8));
+    SET_STRING_ELT(nms, 0, Rf_mkChar("beta"));
+    SET_STRING_ELT(nms, 1, Rf_mkChar("se"));
+    SET_STRING_ELT(nms, 2, Rf_mkChar("v"));
+    SET_STRING_ELT(nms, 3, Rf_mkChar("alpha"));
+    SET_STRING_ELT(nms, 4, Rf_mkChar("tuning_parameter"));
+    SET_STRING_ELT(nms, 5, Rf_mkChar("BIC"));
+    SET_STRING_ELT(nms, 6, Rf_mkChar("repetition"));
+    SET_STRING_ELT(nms, 7, Rf_mkChar("convergence"));
+    Rf_setAttrib(out, R_NamesSymbol, nms);
 
     UNPROTECT(10);
     return out;
@@ -1040,10 +1032,10 @@ SEXP fhl_fit_vs_1re(SEXP X_s, SEXP B_s, SEXP Z_list_s, SEXP v_list_s,
         TYPEOF(Z_list_s) != VECSXP || TYPEOF(v_list_s) != VECSXP) {
         Rf_error("Invalid SEXP argument types in fhl_fit_vs_1re");
     }
-    int n = nrows(X_s), p = ncols(X_s);
+    int n = Rf_nrows(X_s), p = Rf_ncols(X_s);
     int nrand = LENGTH(Z_list_s);
-    int pen_type = asInteger(pen_type_s);
-    int varfixed = asLogical(varfixed_s);
+    int pen_type = Rf_asInteger(pen_type_s);
+    int varfixed = Rf_asLogical(varfixed_s);
     int n_grid = LENGTH(tunset1_s);
     if (LENGTH(B_s) != p || LENGTH(v_list_s) != nrand || LENGTH(alpha_s) != nrand || n_grid < 1) {
         Rf_error("non-conformable arguments in fhl_fit_vs_1re");
@@ -1224,10 +1216,10 @@ SEXP fhl_fit_vs_2re(SEXP X_s, SEXP B_s, SEXP Z_list_s, SEXP v_list_s,
         TYPEOF(Z_list_s) != VECSXP || TYPEOF(v_list_s) != VECSXP) {
         Rf_error("Invalid SEXP argument types in fhl_fit_vs_2re");
     }
-    int n = nrows(X_s), p = ncols(X_s);
+    int n = Rf_nrows(X_s), p = Rf_ncols(X_s);
     int nrand = LENGTH(Z_list_s);
     int n_alpha = LENGTH(alpha_s);
-    int pen_type = asInteger(pen_type_s);
+    int pen_type = Rf_asInteger(pen_type_s);
     int n_grid = LENGTH(tunset1_s);
     if (nrand != 2 || n_alpha != 3) {
         Rf_error("fhl_fit_vs_2re requires nrand == 2 and n_alpha == 3");

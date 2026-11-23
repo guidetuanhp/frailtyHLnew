@@ -1,7 +1,7 @@
 /* Native .Call routine table and DLL registration for frailtyHLnew. */
-#include <R_ext/Rdynload.h>
 #include "fhl_core.h"
 #include "fhl_native_api.h"
+#include <R_ext/Rdynload.h>
 
 static const R_CallMethodDef fhl_calls[] = {
     /* Cox Frailty Models */

@@ -1,14 +1,6 @@
 #include "fhl_linalg.h"
 #include "fhl_native_api.h"
-#include <Rmath.h>
-#include <string.h>
-#include <stdlib.h>
-#include <math.h>
 #include <float.h>
-
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #undef exp
 #undef log
@@ -163,11 +155,11 @@ static SEXP fhl_aft_hl11_pack_result(
     const double *alpha, double phi, int iter_done, double last_pdiff,
     int converged_flag, const char *status_str, const char *reason_str
 ) {
-    SEXP out = PROTECT(allocVector(VECSXP, 10));
-    SEXP beta_s = PROTECT(allocVector(REALSXP, pp));
-    SEXP se_s = PROTECT(allocVector(REALSXP, pp));
-    SEXP v_s = PROTECT(allocVector(REALSXP, qq));
-    SEXP alpha_s = PROTECT(allocVector(REALSXP, nrand));
+    SEXP out = PROTECT(Rf_allocVector(VECSXP, 10));
+    SEXP beta_s = PROTECT(Rf_allocVector(REALSXP, pp));
+    SEXP se_s = PROTECT(Rf_allocVector(REALSXP, pp));
+    SEXP v_s = PROTECT(Rf_allocVector(REALSXP, qq));
+    SEXP alpha_s = PROTECT(Rf_allocVector(REALSXP, nrand));
 
     for (int j = 0; j < pp; j++) {
         REAL(beta_s)[j] = beta ? beta[j] : NA_REAL;
@@ -184,12 +176,12 @@ static SEXP fhl_aft_hl11_pack_result(
     SET_VECTOR_ELT(out, 1, se_s);
     SET_VECTOR_ELT(out, 2, v_s);
     SET_VECTOR_ELT(out, 3, alpha_s);
-    SET_VECTOR_ELT(out, 4, ScalarReal(phi));
-    SET_VECTOR_ELT(out, 5, ScalarInteger(iter_done));
-    SET_VECTOR_ELT(out, 6, ScalarReal(last_pdiff));
-    SET_VECTOR_ELT(out, 7, ScalarLogical(converged_flag ? 1 : 0));
-    SET_VECTOR_ELT(out, 8, mkString(status_str));
-    SET_VECTOR_ELT(out, 9, mkString(reason_str));
+    SET_VECTOR_ELT(out, 4, Rf_ScalarReal(phi));
+    SET_VECTOR_ELT(out, 5, Rf_ScalarInteger(iter_done));
+    SET_VECTOR_ELT(out, 6, Rf_ScalarReal(last_pdiff));
+    SET_VECTOR_ELT(out, 7, Rf_ScalarLogical(converged_flag ? 1 : 0));
+    SET_VECTOR_ELT(out, 8, Rf_mkString(status_str));
+    SET_VECTOR_ELT(out, 9, Rf_mkString(reason_str));
 
     UNPROTECT(5);
     return out;
@@ -1248,12 +1240,12 @@ static SEXP fhl_aft_dense_hl11(
 /* AFT 1-RE general random-effects solver (explicit Z matrix, e.g. random slopes) */
 static SEXP fhl_aft_1re_general(SEXP y_s, SEXP x_s, SEXP z_s, int qq_expected, SEXP delta_s,
                                 SEXP beta_h0_s, SEXP v_h0_s, SEXP maxiter_s) {
-    int nn = nrows(x_s), pp = ncols(x_s), qq = ncols(z_s);
+    int nn = Rf_nrows(x_s), pp = Rf_ncols(x_s), qq = Rf_ncols(z_s);
     int r_tot = pp + qq;
-    int maxiter = asInteger(maxiter_s);
+    int maxiter = Rf_asInteger(maxiter_s);
     int mord = (TYPEOF(maxiter_s) == INTSXP && LENGTH(maxiter_s) >= 2) ? INTEGER(maxiter_s)[1] : 0;
-    if (nn <= 0 || pp <= 0 || qq <= 0 || qq != qq_expected || nrows(z_s) != nn || length(y_s) != nn ||
-        length(delta_s) != nn || length(beta_h0_s) != pp || length(v_h0_s) != qq) {
+    if (nn <= 0 || pp <= 0 || qq <= 0 || qq != qq_expected || Rf_nrows(z_s) != nn || Rf_length(y_s) != nn ||
+        Rf_length(delta_s) != nn || Rf_length(beta_h0_s) != pp || Rf_length(v_h0_s) != qq) {
         Rf_error("Invalid dimensions in fhl_fit_aft_1re");
     }
     if (mord == 1) {
@@ -1428,23 +1420,23 @@ static SEXP fhl_aft_1re_general(SEXP y_s, SEXP x_s, SEXP z_s, int qq_expected, S
         muij, w1_vec, W_B, H_mlm, hinv
     );
 
-    SEXP out = PROTECT(allocVector(VECSXP, 7));
-    SEXP beta_h_s = PROTECT(allocVector(REALSXP, pp));
-    SEXP se_beh_s = PROTECT(allocVector(REALSXP, pp));
+    SEXP out = PROTECT(Rf_allocVector(VECSXP, 7));
+    SEXP beta_h_s = PROTECT(Rf_allocVector(REALSXP, pp));
+    SEXP se_beh_s = PROTECT(Rf_allocVector(REALSXP, pp));
     for (int j = 0; j < pp; j++) {
         REAL(beta_h_s)[j] = beta_h0[j];
         REAL(se_beh_s)[j] = sqrt(hinv[j + (size_t)r_tot * j]);
     }
-    SEXP v_out_s = PROTECT(allocVector(REALSXP, qq));
+    SEXP v_out_s = PROTECT(Rf_allocVector(REALSXP, qq));
     memcpy(REAL(v_out_s), v_h0, (size_t)qq * sizeof(double));
 
     SET_VECTOR_ELT(out, 0, beta_h_s);
     SET_VECTOR_ELT(out, 1, se_beh_s);
     SET_VECTOR_ELT(out, 2, v_out_s);
-    SET_VECTOR_ELT(out, 3, ScalarReal(alpha));
-    SET_VECTOR_ELT(out, 4, ScalarReal(phi));
-    SET_VECTOR_ELT(out, 5, ScalarInteger(i_count));
-    SET_VECTOR_ELT(out, 6, ScalarReal(convergence));
+    SET_VECTOR_ELT(out, 3, Rf_ScalarReal(alpha));
+    SET_VECTOR_ELT(out, 4, Rf_ScalarReal(phi));
+    SET_VECTOR_ELT(out, 5, Rf_ScalarInteger(i_count));
+    SET_VECTOR_ELT(out, 6, Rf_ScalarReal(convergence));
 
     UNPROTECT(4);
     return out;
@@ -1501,15 +1493,15 @@ SEXP fhl_fit_aft_1re(
         Rf_error("Invalid SEXP types in fhl_fit_aft_1re");
     }
     if (TYPEOF(group_s) == REALSXP && Rf_isMatrix(group_s)) {
-        return fhl_aft_1re_general(y_s, x_s, group_s, asInteger(qq_s), delta_s, beta_h0_s, v_h0_s, maxiter_s);
+        return fhl_aft_1re_general(y_s, x_s, group_s, Rf_asInteger(qq_s), delta_s, beta_h0_s, v_h0_s, maxiter_s);
     }
     if (TYPEOF(group_s) != INTSXP) {
         Rf_error("group_s must be an integer cluster vector or numeric Z matrix in fhl_fit_aft_1re");
     }
-    int nn = nrows(x_s), pp = ncols(x_s), qq = asInteger(qq_s);
-    int maxiter = asInteger(maxiter_s);
-    if (nn <= 0 || pp <= 0 || qq <= 0 || length(y_s) != nn || length(group_s) != nn ||
-        length(delta_s) != nn || length(beta_h0_s) != pp || length(v_h0_s) != qq) {
+    int nn = Rf_nrows(x_s), pp = Rf_ncols(x_s), qq = Rf_asInteger(qq_s);
+    int maxiter = Rf_asInteger(maxiter_s);
+    if (nn <= 0 || pp <= 0 || qq <= 0 || Rf_length(y_s) != nn || Rf_length(group_s) != nn ||
+        Rf_length(delta_s) != nn || Rf_length(beta_h0_s) != pp || Rf_length(v_h0_s) != qq) {
         Rf_error("Invalid dimensions in fhl_fit_aft_1re");
     }
 
@@ -1785,23 +1777,23 @@ SEXP fhl_fit_aft_1re(
         }
     }
 
-    SEXP out = PROTECT(allocVector(VECSXP, 7));
-    SEXP beta_h_s = PROTECT(allocVector(REALSXP, pp));
-    SEXP se_beh_s = PROTECT(allocVector(REALSXP, pp));
+    SEXP out = PROTECT(Rf_allocVector(VECSXP, 7));
+    SEXP beta_h_s = PROTECT(Rf_allocVector(REALSXP, pp));
+    SEXP se_beh_s = PROTECT(Rf_allocVector(REALSXP, pp));
     for (int j = 0; j < pp; j++) {
         REAL(beta_h_s)[j] = beta_h0[j];
         REAL(se_beh_s)[j] = sqrt(hinv_XX[j + (size_t)pp * j]);
     }
-    SEXP v_out_s = PROTECT(allocVector(REALSXP, qq));
+    SEXP v_out_s = PROTECT(Rf_allocVector(REALSXP, qq));
     memcpy(REAL(v_out_s), v_h0, (size_t)qq * sizeof(double));
 
     SET_VECTOR_ELT(out, 0, beta_h_s);
     SET_VECTOR_ELT(out, 1, se_beh_s);
     SET_VECTOR_ELT(out, 2, v_out_s);
-    SET_VECTOR_ELT(out, 3, ScalarReal(alpha));
-    SET_VECTOR_ELT(out, 4, ScalarReal(phi));
-    SET_VECTOR_ELT(out, 5, ScalarInteger(i_count));
-    SET_VECTOR_ELT(out, 6, ScalarReal(convergence));
+    SET_VECTOR_ELT(out, 3, Rf_ScalarReal(alpha));
+    SET_VECTOR_ELT(out, 4, Rf_ScalarReal(phi));
+    SET_VECTOR_ELT(out, 5, Rf_ScalarInteger(i_count));
+    SET_VECTOR_ELT(out, 6, Rf_ScalarReal(convergence));
 
     UNPROTECT(4);
     return out;
@@ -1810,15 +1802,15 @@ SEXP fhl_fit_aft_1re(
 /* AFT 2-RE general random-effects solver (explicit Z1, Z2 matrices, e.g. random slopes) */
 static SEXP fhl_aft_2re_general(SEXP y_s, SEXP x_s, SEXP z1_s, int qq1, SEXP z2_s, int qq2,
                                 SEXP delta_s, SEXP beta_h0_s, SEXP v_h0_s, SEXP maxiter_s) {
-    int nn = nrows(x_s), pp = ncols(x_s);
+    int nn = Rf_nrows(x_s), pp = Rf_ncols(x_s);
     int qq = qq1 + qq2;
     int r_tot = pp + qq;
-    int maxiter = asInteger(maxiter_s);
+    int maxiter = Rf_asInteger(maxiter_s);
     int mord = (TYPEOF(maxiter_s) == INTSXP && LENGTH(maxiter_s) >= 2) ? INTEGER(maxiter_s)[1] : 0;
     if (nn <= 0 || pp <= 0 || qq1 <= 0 || qq2 <= 0 ||
-        nrows(z1_s) != nn || ncols(z1_s) != qq1 ||
-        nrows(z2_s) != nn || ncols(z2_s) != qq2 ||
-        length(y_s) != nn || length(delta_s) != nn || length(beta_h0_s) != pp || length(v_h0_s) != qq) {
+        Rf_nrows(z1_s) != nn || Rf_ncols(z1_s) != qq1 ||
+        Rf_nrows(z2_s) != nn || Rf_ncols(z2_s) != qq2 ||
+        Rf_length(y_s) != nn || Rf_length(delta_s) != nn || Rf_length(beta_h0_s) != pp || Rf_length(v_h0_s) != qq) {
         Rf_error("Invalid dimensions in fhl_fit_aft_2re");
     }
 
@@ -2024,24 +2016,24 @@ static SEXP fhl_aft_2re_general(SEXP y_s, SEXP x_s, SEXP z1_s, int qq1, SEXP z2_
         muij, w1_vec, W_B, H_mlm, hinv
     );
 
-    SEXP out = PROTECT(allocVector(VECSXP, 8));
-    SEXP beta_h_s = PROTECT(allocVector(REALSXP, pp));
-    SEXP se_beh_s = PROTECT(allocVector(REALSXP, pp));
+    SEXP out = PROTECT(Rf_allocVector(VECSXP, 8));
+    SEXP beta_h_s = PROTECT(Rf_allocVector(REALSXP, pp));
+    SEXP se_beh_s = PROTECT(Rf_allocVector(REALSXP, pp));
     for (int j = 0; j < pp; j++) {
         REAL(beta_h_s)[j] = beta_h0[j];
         REAL(se_beh_s)[j] = sqrt(hinv[j + (size_t)r_tot * j]);
     }
-    SEXP v_out_s = PROTECT(allocVector(REALSXP, qq));
+    SEXP v_out_s = PROTECT(Rf_allocVector(REALSXP, qq));
     memcpy(REAL(v_out_s), v_h0, (size_t)qq * sizeof(double));
 
     SET_VECTOR_ELT(out, 0, beta_h_s);
     SET_VECTOR_ELT(out, 1, se_beh_s);
     SET_VECTOR_ELT(out, 2, v_out_s);
-    SET_VECTOR_ELT(out, 3, ScalarReal(alpha1));
-    SET_VECTOR_ELT(out, 4, ScalarReal(alpha2));
-    SET_VECTOR_ELT(out, 5, ScalarReal(phi));
-    SET_VECTOR_ELT(out, 6, ScalarInteger(i_count));
-    SET_VECTOR_ELT(out, 7, ScalarReal(convergence));
+    SET_VECTOR_ELT(out, 3, Rf_ScalarReal(alpha1));
+    SET_VECTOR_ELT(out, 4, Rf_ScalarReal(alpha2));
+    SET_VECTOR_ELT(out, 5, Rf_ScalarReal(phi));
+    SET_VECTOR_ELT(out, 6, Rf_ScalarInteger(i_count));
+    SET_VECTOR_ELT(out, 7, Rf_ScalarReal(convergence));
 
     UNPROTECT(4);
     return out;
@@ -2140,7 +2132,7 @@ SEXP fhl_fit_aft_2re(
         TYPEOF(delta_s) != REALSXP || TYPEOF(beta_h0_s) != REALSXP || TYPEOF(v_h0_s) != REALSXP) {
         Rf_error("Invalid SEXP types in fhl_fit_aft_2re");
     }
-    int qq1 = asInteger(qq1_s), qq2 = asInteger(qq2_s);
+    int qq1 = Rf_asInteger(qq1_s), qq2 = Rf_asInteger(qq2_s);
     if (TYPEOF(group1_s) == REALSXP && Rf_isMatrix(group1_s) &&
         TYPEOF(group2_s) == REALSXP && Rf_isMatrix(group2_s)) {
         return fhl_aft_2re_general(y_s, x_s, group1_s, qq1, group2_s, qq2, delta_s, beta_h0_s, v_h0_s, maxiter_s);
@@ -2148,11 +2140,11 @@ SEXP fhl_fit_aft_2re(
     if (TYPEOF(group1_s) != INTSXP || TYPEOF(group2_s) != INTSXP) {
         Rf_error("group1_s and group2_s must both be integer cluster vectors or numeric Z matrices in fhl_fit_aft_2re");
     }
-    int nn = nrows(x_s), pp = ncols(x_s);
-    int maxiter = asInteger(maxiter_s);
+    int nn = Rf_nrows(x_s), pp = Rf_ncols(x_s);
+    int maxiter = Rf_asInteger(maxiter_s);
     if (nn <= 0 || pp <= 0 || qq1 <= 0 || qq2 <= 0 ||
-        length(y_s) != nn || length(group1_s) != nn || length(group2_s) != nn ||
-        length(delta_s) != nn || length(beta_h0_s) != pp || length(v_h0_s) != qq1 + qq2) {
+        Rf_length(y_s) != nn || Rf_length(group1_s) != nn || Rf_length(group2_s) != nn ||
+        Rf_length(delta_s) != nn || Rf_length(beta_h0_s) != pp || Rf_length(v_h0_s) != qq1 + qq2) {
         Rf_error("Invalid dimensions in fhl_fit_aft_2re");
     }
 
@@ -2574,14 +2566,14 @@ SEXP fhl_fit_aft_2re(
         }
     }
 
-    SEXP out = PROTECT(allocVector(VECSXP, 8));
-    SEXP beta_h_s = PROTECT(allocVector(REALSXP, pp));
-    SEXP se_beh_s = PROTECT(allocVector(REALSXP, pp));
+    SEXP out = PROTECT(Rf_allocVector(VECSXP, 8));
+    SEXP beta_h_s = PROTECT(Rf_allocVector(REALSXP, pp));
+    SEXP se_beh_s = PROTECT(Rf_allocVector(REALSXP, pp));
     for (int j = 0; j < pp; j++) {
         REAL(beta_h_s)[j] = beta_h0[j];
         REAL(se_beh_s)[j] = sqrt(Hinv_AA[j + (size_t)mA * (size_t)j]);
     }
-    SEXP v_out_s = PROTECT(allocVector(REALSXP, qq1 + qq2));
+    SEXP v_out_s = PROTECT(Rf_allocVector(REALSXP, qq1 + qq2));
     if (!swapped) {
         memcpy(REAL(v_out_s), vs, (size_t)qs * sizeof(double));
         memcpy(REAL(v_out_s) + qs, vb, (size_t)qb * sizeof(double));
@@ -2593,11 +2585,11 @@ SEXP fhl_fit_aft_2re(
     SET_VECTOR_ELT(out, 0, beta_h_s);
     SET_VECTOR_ELT(out, 1, se_beh_s);
     SET_VECTOR_ELT(out, 2, v_out_s);
-    SET_VECTOR_ELT(out, 3, ScalarReal(swapped ? alpha_b : alpha_s));
-    SET_VECTOR_ELT(out, 4, ScalarReal(swapped ? alpha_s : alpha_b));
-    SET_VECTOR_ELT(out, 5, ScalarReal(phi));
-    SET_VECTOR_ELT(out, 6, ScalarInteger(i_count));
-    SET_VECTOR_ELT(out, 7, ScalarReal(convergence));
+    SET_VECTOR_ELT(out, 3, Rf_ScalarReal(swapped ? alpha_b : alpha_s));
+    SET_VECTOR_ELT(out, 4, Rf_ScalarReal(swapped ? alpha_s : alpha_b));
+    SET_VECTOR_ELT(out, 5, Rf_ScalarReal(phi));
+    SET_VECTOR_ELT(out, 6, Rf_ScalarInteger(i_count));
+    SET_VECTOR_ELT(out, 7, Rf_ScalarReal(convergence));
 
     UNPROTECT(4);
     return out;

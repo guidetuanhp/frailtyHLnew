@@ -1,14 +1,6 @@
 #include "fhl_linalg.h"
-#include "fhl_core.h"
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
 #include <float.h>
-#include <limits.h>
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 double fhl_c_r_exp(double x) {
     return (double)expl((long double)x);
 }
@@ -404,7 +396,9 @@ int fhl_c_lognormal_inverse(
     }
 
     if (ok) {
+#ifdef _OPENMP
         const int nth_inv = fhl_blas_detect_threads(Q);
+#endif
         /* BD <- H_xz %*% Dinv (p x Q) and DC <- Dinv %*% H_zx = BD^T (Q x p) via unit-stride columns */
 #ifdef _OPENMP
 #pragma omp parallel for num_threads(nth_inv) schedule(static) if (Q >= 128)
@@ -1537,11 +1531,7 @@ static void fhl_c_risk_backward_sparse(
 #if defined(__GNUC__) && (defined(__x86_64__) || defined(__amd64__)) && !defined(FHL_NO_AVX2)
 #include <immintrin.h>
 #define FHL_LA_HAVE_AVX2 1
-#if defined(__clang__)
 #define FHL_LA_AVX2_ATTR __attribute__((target("avx2,fma")))
-#else
-#define FHL_LA_AVX2_ATTR __attribute__((target("avx2,fma"), optimize("O3")))
-#endif
 
 static FHL_LA_AVX2_ATTR void fhl_la_axpy_avx2(int len, double a, const double *x, double *y) {
     int u = 0;

@@ -8,10 +8,16 @@
 
 static FHL_KATTR void FHL_K(simd_trsm_UT_left)(int kb, int rem, const double *U, int ldu,
                                                double *panel, int ldp, int nth) {
+#ifdef _OPENMP
 #pragma omp parallel num_threads(nth) if (rem >= 64)
+#else
+    (void)nth;
+#endif
     {
         double Upack[96 * 8] __attribute__((aligned(64)));
+#ifdef _OPENMP
 #pragma omp for schedule(static)
+#endif
         for (int j0 = 0; j0 < rem; j0 += 8) {
             int jmax = (rem - j0 < 8) ? (rem - j0) : 8;
             if (jmax == 8) {
@@ -56,10 +62,16 @@ static FHL_KATTR void FHL_K(simd_trsm_UT_left)(int kb, int rem, const double *U,
 
 static FHL_KATTR void FHL_K(simd_syrk_upper_panel)(int kb, int rem, const double *panel, int ldp,
                                                    double *C, int ldc, int nth) {
+#ifdef _OPENMP
 #pragma omp parallel num_threads(nth) if (rem >= 64)
+#else
+    (void)nth;
+#endif
     {
         double Apack[96 * 8] __attribute__((aligned(64)));
+#ifdef _OPENMP
 #pragma omp for schedule(dynamic, 1)
+#endif
         for (int i0 = 0; i0 < rem; i0 += 8) {
             int imax = (rem - i0 < 8) ? (rem - i0) : 8;
             if (imax == 8) {
@@ -170,13 +182,17 @@ static FHL_KATTR int FHL_K(portable_potrf_upper)(int r, double *U, int nth) {
             for (int i = 0; i < j; i++) {
                 const double *ui = U + k + (size_t)r * (k + i);
                 double s = 0;
+#ifdef _OPENMP
 #pragma omp simd reduction(+ : s)
+#endif
                 for (int l = 0; l < i; l++)
                     s += ui[l] * uj[l];
                 uj[i] = (uj[i] - s) / ui[i];
             }
             double ds = 0;
+#ifdef _OPENMP
 #pragma omp simd reduction(+ : ds)
+#endif
             for (int l = 0; l < j; l++)
                 ds += uj[l] * uj[l];
             double d = uj[j] - ds;
@@ -200,7 +216,11 @@ static FHL_KATTR void FHL_K(portable_potri_from_U)(int r, const double *U, doubl
     for (int j = 0; j < r; j++)
         inv_diag[j] = 1.0 / U[j + (size_t)r * j];
     int n_panels = (r + 7) / 8;
+#ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1) num_threads(nth)
+#else
+    (void)nth;
+#endif
     for (int p_id = 0; p_id < n_panels; p_id++) {
         int i0 = p_id * 8;
         int imax = (r - i0 < 8) ? (r - i0) : 8;
@@ -235,7 +255,9 @@ static FHL_KATTR void FHL_K(portable_potri_from_U)(int r, const double *U, doubl
             _mm256_storeu_pd(rp + (size_t)j * 8 + 4, _mm256_mul_pd(s1, id));
         }
     }
+#ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1) num_threads(nth)
+#endif
     for (int p_i = 0; p_i < n_panels; p_i++) {
         int i0 = p_i * 8;
         int imax = (r - i0 < 8) ? (r - i0) : 8;
@@ -297,10 +319,16 @@ static FHL_KATTR void FHL_K(portable_potri_from_U)(int r, const double *U, doubl
 static FHL_KATTR void FHL_K(portable_symm_left)(int r, const double *A, const double *B, double *C,
                                                 int nth) {
     int kc = 256, mc = 32;
+#ifdef _OPENMP
 #pragma omp parallel num_threads(nth)
+#else
+    (void)nth;
+#endif
     {
         double Apack[32 * 256] __attribute__((aligned(64)));
+#ifdef _OPENMP
 #pragma omp for schedule(dynamic, 1)
+#endif
         for (int im = 0; im < r; im += mc) {
             int m_len = (r - im < mc) ? (r - im) : mc;
             for (int l0 = 0; l0 < r; l0 += kc) {
@@ -422,7 +450,11 @@ static FHL_KATTR void FHL_K(portable_symm_left)(int r, const double *A, const do
 
 static FHL_KATTR void FHL_K(simd_trsm_UT_left)(int kb, int rem, const double *U, int ldu,
                                                double *panel, int ldp, int nth) {
+#ifdef _OPENMP
 #pragma omp parallel for schedule(static) num_threads(nth) if (rem >= 64)
+#else
+    (void)nth;
+#endif
     for (int j0 = 0; j0 < rem; j0 += 4) {
         int jmax = (rem - j0 < 4) ? (rem - j0) : 4;
         if (jmax == 4) {
@@ -431,7 +463,9 @@ static FHL_KATTR void FHL_K(simd_trsm_UT_left)(int kb, int rem, const double *U,
             for (int i = 0; i < kb; i++) {
                 const double *ui = U + (size_t)ldu * i;
                 double s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+#ifdef _OPENMP
 #pragma omp simd reduction(+ : s0, s1, s2, s3)
+#endif
                 for (int l = 0; l < i; l++) {
                     double u = ui[l];
                     s0 += u * p0[l];
@@ -451,7 +485,9 @@ static FHL_KATTR void FHL_K(simd_trsm_UT_left)(int kb, int rem, const double *U,
                 for (int i = 0; i < kb; i++) {
                     const double *ui = U + (size_t)ldu * i;
                     double s = 0;
+#ifdef _OPENMP
 #pragma omp simd reduction(+ : s)
+#endif
                     for (int l = 0; l < i; l++)
                         s += ui[l] * pj[l];
                     pj[i] = (pj[i] - s) / ui[i];
@@ -463,7 +499,11 @@ static FHL_KATTR void FHL_K(simd_trsm_UT_left)(int kb, int rem, const double *U,
 
 static FHL_KATTR void FHL_K(simd_syrk_upper_panel)(int kb, int rem, const double *panel, int ldp,
                                                    double *C, int ldc, int nth) {
+#ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1) num_threads(nth) if (rem >= 64)
+#else
+    (void)nth;
+#endif
     for (int j0 = 0; j0 < rem; j0 += 4) {
         int jmax = (rem - j0 < 4) ? (rem - j0) : 4;
         if (jmax == 4) {
@@ -478,7 +518,9 @@ static FHL_KATTR void FHL_K(simd_syrk_upper_panel)(int kb, int rem, const double
                 const double *pi0 = panel + (size_t)ldp * (i + 0),
                              *pi1 = panel + (size_t)ldp * (i + 1);
                 double s00 = 0, s01 = 0, s02 = 0, s03 = 0, s10 = 0, s11 = 0, s12 = 0, s13 = 0;
+#ifdef _OPENMP
 #pragma omp simd reduction(+ : s00, s01, s02, s03, s10, s11, s12, s13)
+#endif
                 for (int l = 0; l < kb; l++) {
                     double a0 = pi0[l], a1 = pi1[l];
                     double b0 = pj0[l], b1 = pj1[l], b2 = pj2[l], b3 = pj3[l];
@@ -507,7 +549,9 @@ static FHL_KATTR void FHL_K(simd_syrk_upper_panel)(int kb, int rem, const double
                 for (int ii = i; ii <= j; ii++) {
                     const double *pi = panel + (size_t)ldp * ii;
                     double s = 0;
+#ifdef _OPENMP
 #pragma omp simd reduction(+ : s)
+#endif
                     for (int l = 0; l < kb; l++)
                         s += pi[l] * pj[l];
                     cj[ii] -= s;
@@ -521,7 +565,9 @@ static FHL_KATTR void FHL_K(simd_syrk_upper_panel)(int kb, int rem, const double
                 for (int ii = 0; ii <= j; ii++) {
                     const double *pi = panel + (size_t)ldp * ii;
                     double s = 0;
+#ifdef _OPENMP
 #pragma omp simd reduction(+ : s)
+#endif
                     for (int l = 0; l < kb; l++)
                         s += pi[l] * pj[l];
                     cj[ii] -= s;
@@ -540,13 +586,17 @@ static FHL_KATTR int FHL_K(portable_potrf_upper)(int r, double *U, int nth) {
             for (int i = 0; i < j; i++) {
                 const double *ui = U + k + (size_t)r * (k + i);
                 double s = 0;
+#ifdef _OPENMP
 #pragma omp simd reduction(+ : s)
+#endif
                 for (int l = 0; l < i; l++)
                     s += ui[l] * uj[l];
                 uj[i] = (uj[i] - s) / ui[i];
             }
             double ds = 0;
+#ifdef _OPENMP
 #pragma omp simd reduction(+ : ds)
+#endif
             for (int l = 0; l < j; l++)
                 ds += uj[l] * uj[l];
             double d = uj[j] - ds;
@@ -569,7 +619,11 @@ static FHL_KATTR void FHL_K(portable_potri_from_U)(int r, const double *U, doubl
                                                    double *Rinv_T, double *inv_diag, int nth) {
     for (int j = 0; j < r; j++)
         inv_diag[j] = 1.0 / U[j + (size_t)r * j];
+#ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1) num_threads(nth)
+#else
+    (void)nth;
+#endif
     for (int i0 = 0; i0 < r; i0 += 4) {
         int imax = (r - i0 < 4) ? (r - i0) : 4;
         if (imax == 4) {
@@ -593,7 +647,9 @@ static FHL_KATTR void FHL_K(portable_potri_from_U)(int r, const double *U, doubl
                 double s1 = r1[i0 + 1] * uj[i0 + 1] + r1[i0 + 2] * uj[i0 + 2];
                 double s2 = r2[i0 + 2] * uj[i0 + 2];
                 double s3 = 0;
+#ifdef _OPENMP
 #pragma omp simd reduction(+ : s0, s1, s2, s3)
+#endif
                 for (int l = i0 + 3; l < j; l++) {
                     double u = uj[l];
                     s0 += r0[l] * u;
@@ -615,7 +671,9 @@ static FHL_KATTR void FHL_K(portable_potri_from_U)(int r, const double *U, doubl
                 for (int j = i + 1; j < r; j++) {
                     const double *uj = U + (size_t)r * j;
                     double s = 0;
+#ifdef _OPENMP
 #pragma omp simd reduction(+ : s)
+#endif
                     for (int l = i; l < j; l++)
                         s += ri[l] * uj[l];
                     ri[j] = -s * inv_diag[j];
@@ -623,7 +681,9 @@ static FHL_KATTR void FHL_K(portable_potri_from_U)(int r, const double *U, doubl
             }
         }
     }
+#ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1) num_threads(nth)
+#endif
     for (int j0 = 0; j0 < r; j0 += 4) {
         int jmax = (r - j0 < 4) ? (r - j0) : 4;
         if (jmax == 4) {
@@ -637,7 +697,9 @@ static FHL_KATTR void FHL_K(portable_potri_from_U)(int r, const double *U, doubl
                              *ri1 = Rinv_T + (size_t)r * (i + 1);
                 double s00 = 0, s01 = 0, s02 = 0, s03 = 0, s10 = 0, s11 = 0, s12 = 0, s13 = 0;
                 int l_start = j0 + 3;
+#ifdef _OPENMP
 #pragma omp simd reduction(+ : s00, s01, s02, s03, s10, s11, s12, s13)
+#endif
                 for (int l = l_start; l < r; l++) {
                     double a0 = ri0[l], a1 = ri1[l];
                     double b0 = rj0[l], b1 = rj1[l], b2 = rj2[l], b3 = rj3[l];
@@ -684,7 +746,9 @@ static FHL_KATTR void FHL_K(portable_potri_from_U)(int r, const double *U, doubl
                 for (int ii = i; ii <= j; ii++) {
                     const double *ri = Rinv_T + (size_t)r * ii;
                     double s = 0;
+#ifdef _OPENMP
 #pragma omp simd reduction(+ : s)
+#endif
                     for (int l = j; l < r; l++)
                         s += ri[l] * rj[l];
                     cj[ii] = s;
@@ -698,7 +762,9 @@ static FHL_KATTR void FHL_K(portable_potri_from_U)(int r, const double *U, doubl
                 for (int ii = 0; ii <= j; ii++) {
                     const double *ri = Rinv_T + (size_t)r * ii;
                     double s = 0;
+#ifdef _OPENMP
 #pragma omp simd reduction(+ : s)
+#endif
                     for (int l = j; l < r; l++)
                         s += ri[l] * rj[l];
                     cj[ii] = s;
@@ -710,7 +776,11 @@ static FHL_KATTR void FHL_K(portable_potri_from_U)(int r, const double *U, doubl
 
 static FHL_KATTR void FHL_K(portable_symm_left)(int r, const double *A, const double *B, double *C,
                                                 int nth) {
+#ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1) num_threads(nth)
+#else
+    (void)nth;
+#endif
     for (int j0 = 0; j0 < r; j0 += 4) {
         int jmax = (r - j0 < 4) ? (r - j0) : 4;
         if (jmax == 4) {
@@ -722,7 +792,9 @@ static FHL_KATTR void FHL_K(portable_symm_left)(int r, const double *A, const do
             for (; ii + 1 < r; ii += 2) {
                 const double *ai0 = A + (size_t)r * (ii + 0), *ai1 = A + (size_t)r * (ii + 1);
                 double s00 = 0, s01 = 0, s02 = 0, s03 = 0, s10 = 0, s11 = 0, s12 = 0, s13 = 0;
+#ifdef _OPENMP
 #pragma omp simd reduction(+ : s00, s01, s02, s03, s10, s11, s12, s13)
+#endif
                 for (int l = 0; l < r; l++) {
                     double a0 = ai0[l], a1 = ai1[l];
                     double b0 = bj0[l], b1 = bj1[l], b2 = bj2[l], b3 = bj3[l];
@@ -747,7 +819,9 @@ static FHL_KATTR void FHL_K(portable_symm_left)(int r, const double *A, const do
             for (; ii < r; ii++) {
                 const double *ai = A + (size_t)r * ii;
                 double s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+#ifdef _OPENMP
 #pragma omp simd reduction(+ : s0, s1, s2, s3)
+#endif
                 for (int l = 0; l < r; l++) {
                     double a = ai[l];
                     s0 += a * bj0[l];
@@ -768,7 +842,9 @@ static FHL_KATTR void FHL_K(portable_symm_left)(int r, const double *A, const do
                 for (int ii = 0; ii < r; ii++) {
                     const double *ai = A + (size_t)r * ii;
                     double s = 0;
+#ifdef _OPENMP
 #pragma omp simd reduction(+ : s)
+#endif
                     for (int l = 0; l < r; l++)
                         s += ai[l] * bj[l];
                     cj[ii] = s;

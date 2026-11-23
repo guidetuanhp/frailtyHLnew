@@ -1,7 +1,7 @@
 #ifndef FHL_NATIVE_API_H
 #define FHL_NATIVE_API_H
 
-#include <Rinternals.h>
+#include "fhl_core.h"
 
 /* Cox Frailty Models (Gamma, Normal, AR(1)) */
 SEXP fhl_fit_cox_gamma(

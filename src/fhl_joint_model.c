@@ -1,14 +1,6 @@
 #include "fhl_linalg.h"
 #include "fhl_native_api.h"
-#include <Rmath.h>
-#include <string.h>
-#include <stdlib.h>
-#include <math.h>
 #include <float.h>
-
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 #undef exp
 #undef log
@@ -518,24 +510,24 @@ SEXP fhl_fit_jm_cox1(SEXP y1_s, SEXP X1_s, SEXP Z1_s,
     }
 
     /* Return list(beta_h, se_beh, v_h0, phi, alpha, rho, i_count, convergence) */
-    SEXP out = PROTECT(allocVector(VECSXP, 8));
-    SEXP beta_h_s = PROTECT(allocVector(REALSXP, pp));
-    SEXP se_beh_s = PROTECT(allocVector(REALSXP, pp));
+    SEXP out = PROTECT(Rf_allocVector(VECSXP, 8));
+    SEXP beta_h_s = PROTECT(Rf_allocVector(REALSXP, pp));
+    SEXP se_beh_s = PROTECT(Rf_allocVector(REALSXP, pp));
     for (int j = 0; j < pp; j++) {
         REAL(beta_h_s)[j] = beta_vv[j];
         REAL(se_beh_s)[j] = sqrt(hinv[j + (size_t)r_tot * (size_t)j]);
     }
-    SEXP v_out_s = PROTECT(allocVector(REALSXP, qq));
+    SEXP v_out_s = PROTECT(Rf_allocVector(REALSXP, qq));
     memcpy(REAL(v_out_s), v_h0, (size_t)qq * sizeof(double));
 
     SET_VECTOR_ELT(out, 0, beta_h_s);
     SET_VECTOR_ELT(out, 1, se_beh_s);
     SET_VECTOR_ELT(out, 2, v_out_s);
-    SET_VECTOR_ELT(out, 3, ScalarReal(phi));
-    SET_VECTOR_ELT(out, 4, ScalarReal(alpha));
-    SET_VECTOR_ELT(out, 5, ScalarReal(rho));
-    SET_VECTOR_ELT(out, 6, ScalarInteger(i_count));
-    SET_VECTOR_ELT(out, 7, ScalarReal(convergence));
+    SET_VECTOR_ELT(out, 3, Rf_ScalarReal(phi));
+    SET_VECTOR_ELT(out, 4, Rf_ScalarReal(alpha));
+    SET_VECTOR_ELT(out, 5, Rf_ScalarReal(rho));
+    SET_VECTOR_ELT(out, 6, Rf_ScalarInteger(i_count));
+    SET_VECTOR_ELT(out, 7, Rf_ScalarReal(convergence));
 
     UNPROTECT(4);
     return out;
@@ -699,25 +691,25 @@ SEXP fhl_fit_jm_cox2(SEXP y1_s, SEXP X1_s, SEXP Z1_s,
     }
 
     /* Return list(beta_h, se_beh, v_h0, phi, alpha, rho, rho2, i_count, convergence) */
-    SEXP out = PROTECT(allocVector(VECSXP, 9));
-    SEXP beta_h_s = PROTECT(allocVector(REALSXP, pp));
-    SEXP se_beh_s = PROTECT(allocVector(REALSXP, pp));
+    SEXP out = PROTECT(Rf_allocVector(VECSXP, 9));
+    SEXP beta_h_s = PROTECT(Rf_allocVector(REALSXP, pp));
+    SEXP se_beh_s = PROTECT(Rf_allocVector(REALSXP, pp));
     for (int j = 0; j < pp; j++) {
         REAL(beta_h_s)[j] = beta_vv[j];
         REAL(se_beh_s)[j] = sqrt(hinv[j + (size_t)r_tot * (size_t)j]);
     }
-    SEXP v_out_s = PROTECT(allocVector(REALSXP, qq));
+    SEXP v_out_s = PROTECT(Rf_allocVector(REALSXP, qq));
     memcpy(REAL(v_out_s), v_h0, (size_t)qq * sizeof(double));
 
     SET_VECTOR_ELT(out, 0, beta_h_s);
     SET_VECTOR_ELT(out, 1, se_beh_s);
     SET_VECTOR_ELT(out, 2, v_out_s);
-    SET_VECTOR_ELT(out, 3, ScalarReal(phi));
-    SET_VECTOR_ELT(out, 4, ScalarReal(alpha));
-    SET_VECTOR_ELT(out, 5, ScalarReal(rho));
-    SET_VECTOR_ELT(out, 6, ScalarReal(rho2));
-    SET_VECTOR_ELT(out, 7, ScalarInteger(i_count));
-    SET_VECTOR_ELT(out, 8, ScalarReal(convergence));
+    SET_VECTOR_ELT(out, 3, Rf_ScalarReal(phi));
+    SET_VECTOR_ELT(out, 4, Rf_ScalarReal(alpha));
+    SET_VECTOR_ELT(out, 5, Rf_ScalarReal(rho));
+    SET_VECTOR_ELT(out, 6, Rf_ScalarReal(rho2));
+    SET_VECTOR_ELT(out, 7, Rf_ScalarInteger(i_count));
+    SET_VECTOR_ELT(out, 8, Rf_ScalarReal(convergence));
 
     UNPROTECT(4);
     return out;
@@ -859,28 +851,28 @@ SEXP fhl_fit_jm_frailty(SEXP del1_s, SEXP X1_s, SEXP Z1_s,
     double rAIC = -2.0 * p_bvh + 4.0;
 
     /* Return named result list (beta_h, se_beh, v_h0, phi, alpha, rho, iter, likelihoods, AIC, convergence) */
-    SEXP out = PROTECT(allocVector(VECSXP, 12));
-    SEXP beta_h_s = PROTECT(allocVector(REALSXP, pp));
-    SEXP se_beh_s = PROTECT(allocVector(REALSXP, pp));
+    SEXP out = PROTECT(Rf_allocVector(VECSXP, 12));
+    SEXP beta_h_s = PROTECT(Rf_allocVector(REALSXP, pp));
+    SEXP se_beh_s = PROTECT(Rf_allocVector(REALSXP, pp));
     for (int j = 0; j < pp; j++) {
         REAL(beta_h_s)[j] = beta_vv[j];
         REAL(se_beh_s)[j] = sqrt(hinv[j + (size_t)r_tot * (size_t)j]);
     }
-    SEXP v_out_s = PROTECT(allocVector(REALSXP, qq));
+    SEXP v_out_s = PROTECT(Rf_allocVector(REALSXP, qq));
     memcpy(REAL(v_out_s), v_h0, (size_t)qq * sizeof(double));
 
     SET_VECTOR_ELT(out, 0, beta_h_s);
     SET_VECTOR_ELT(out, 1, se_beh_s);
     SET_VECTOR_ELT(out, 2, v_out_s);
-    SET_VECTOR_ELT(out, 3, ScalarReal(alpha));
-    SET_VECTOR_ELT(out, 4, ScalarReal(rho));
-    SET_VECTOR_ELT(out, 5, ScalarInteger(i_count));
-    SET_VECTOR_ELT(out, 6, ScalarReal(h0));
-    SET_VECTOR_ELT(out, 7, ScalarReal(hp));
-    SET_VECTOR_ELT(out, 8, ScalarReal(p_bvh));
-    SET_VECTOR_ELT(out, 9, ScalarReal(cAIC));
-    SET_VECTOR_ELT(out, 10, ScalarReal(rAIC));
-    SET_VECTOR_ELT(out, 11, ScalarReal(convergence));
+    SET_VECTOR_ELT(out, 3, Rf_ScalarReal(alpha));
+    SET_VECTOR_ELT(out, 4, Rf_ScalarReal(rho));
+    SET_VECTOR_ELT(out, 5, Rf_ScalarInteger(i_count));
+    SET_VECTOR_ELT(out, 6, Rf_ScalarReal(h0));
+    SET_VECTOR_ELT(out, 7, Rf_ScalarReal(hp));
+    SET_VECTOR_ELT(out, 8, Rf_ScalarReal(p_bvh));
+    SET_VECTOR_ELT(out, 9, Rf_ScalarReal(cAIC));
+    SET_VECTOR_ELT(out, 10, Rf_ScalarReal(rAIC));
+    SET_VECTOR_ELT(out, 11, Rf_ScalarReal(convergence));
 
     UNPROTECT(4);
     return out;
